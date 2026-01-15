@@ -27,6 +27,8 @@ pub async fn batch_level(
 ) -> Result<HttpResponse, actix_web::Error> {
     if batch.level_ids.is_empty() {
         return Ok(HttpResponse::Ok().json(BatchLevelResponse { levels: vec![] }));
+    } else if batch.level_ids.len() > 50 {
+        return Err(common::bad_request("Too many level IDs"));
     }
 
     let levels = {
@@ -34,7 +36,7 @@ pub async fn batch_level(
         db.get_levels_by_ids(&batch.level_ids).await
             .map_err(|e| {
                 log::error!("{:?}", e);
-                actix_web::error::ErrorInternalServerError("Database error")
+                common::internal_server_error("Database error")
             })?
     };
 
@@ -60,7 +62,7 @@ pub async fn get_level(
         db.get_level_by_id(*level_id).await
             .map_err(|e| {
                 log::error!("{:?}", e);
-                actix_web::error::ErrorInternalServerError("Database error")
+                common::internal_server_error("Database error")
             })?
     };
 
