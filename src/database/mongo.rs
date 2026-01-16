@@ -110,7 +110,8 @@ impl Database for MongoDatabase {
 
     async fn get_level_by_id(&self, level_id: i64) -> anyhow::Result<Option<Level>> {
         let mut pipeline = vec![
-            doc! { "$match": { "_id": level_id as i32 } }
+            doc! { "$match": { "_id": level_id as i32 } },
+            doc! { "$limit": 1 }
         ];
         pipeline.extend(self.build_level_pipeline_stages());
 
