@@ -23,5 +23,22 @@ pub struct Level {
     pub accurate: bool,
     pub platformer: bool,
     pub length: i32,
+    pub rank: i32,
+    pub rate_rank: i32,
+    pub gamemode_rank: i32,
+    pub joined_rank: i32,
+    pub trending_score: f64,
+    pub rate: Option<Rate>,
+}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct BatchLevel {
+    pub level_id: i32,
+    pub send_count: i32,
+    pub accurate: bool,
+    pub platformer: bool,
+    pub length: i32,
+    pub rank: i32,
+    pub trending_score: f64,
     pub rate: Option<Rate>,
 }

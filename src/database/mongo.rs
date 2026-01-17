@@ -2,7 +2,7 @@ use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
 use crate::model::database::{Database, InfoItem, RateItem, SendItem};
-use crate::model::info::Level;
+use crate::model::info::{BatchLevel, Level};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -45,7 +45,6 @@ impl MongoDatabase {
                     "as": "sends"
                 }
             },
-
             doc! {
                 "$lookup": {
                     "from": "rates",
@@ -54,7 +53,14 @@ impl MongoDatabase {
                     "as": "rate"
                 }
             },
-
+            doc! {
+                "$lookup": {
+                    "from": "level_stats",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "stats"
+                }
+            },
             doc! {
                 "$project": {
                     "level_id": "$_id",
@@ -68,6 +74,11 @@ impl MongoDatabase {
                     "accurate": { "$gt": ["$_id", self.oldest_level] },
                     "platformer": 1,
                     "length": 1,
+                    "rank": { "$arrayElemAt": ["$stats.rank", 0] },
+                    "rate_rank": { "$arrayElemAt": ["$stats.rate_rank", 0] },
+                    "gamemode_rank": { "$arrayElemAt": ["$stats.gamemode_rank", 0] },
+                    "joined_rank": { "$arrayElemAt": ["$stats.joined_rank", 0] },
+                    "trending_score": { "$arrayElemAt": ["$stats.trending_score", 0] },
                     "rate": {
                         "$cond": {
                             "if": { "$gt": [{ "$size": "$rate" }, 0] },
@@ -85,23 +96,68 @@ impl MongoDatabase {
             }
         ]
     }
+
+    fn build_batch_level_pipeline_stages(&self) -> Vec<Document> {
+        vec![
+            doc! {
+            "$lookup": {
+                "from": "rates",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "rate"
+            }
+        },
+            doc! {
+            "$lookup": {
+                "from": "level_stats",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "stats"
+            }
+        },
+            doc! {
+            "$project": {
+                "level_id": "$_id",
+                "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
+                "accurate": { "$gt": ["$_id", self.oldest_level] },
+                "platformer": 1,
+                "length": 1,
+                "rank": { "$arrayElemAt": ["$stats.rank", 0] },
+                "trending_score": { "$arrayElemAt": ["$stats.trending_score", 0] },
+                "rate": {
+                    "$cond": {
+                        "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                        "then": {
+                            "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                            "points": { "$arrayElemAt": ["$rate.points", 0] },
+                            "stars": { "$arrayElemAt": ["$rate.stars", 0] },
+                            "timestamp": { "$toLong": { "$arrayElemAt": ["$rate.timestamp", 0] } },
+                            "accurate": { "$arrayElemAt": ["$rate.accurate", 0] }
+                        },
+                        "else": None::<Document>
+                    }
+                }
+            }
+        }
+        ]
+    }
 }
 
 #[async_trait::async_trait]
 impl Database for MongoDatabase {
-    async fn get_levels_by_ids(&self, level_ids: &[i64]) -> anyhow::Result<Vec<Level>> {
+    async fn get_levels_by_ids(&self, level_ids: &[i64]) -> anyhow::Result<Vec<BatchLevel>> {
         let level_ids_i32: Vec<i32> = level_ids.iter().map(|&id| id as i32).collect();
 
         let mut pipeline = vec![
             doc! { "$match": { "_id": { "$in": level_ids_i32 } } }
         ];
-        pipeline.extend(self.build_level_pipeline_stages());
+        pipeline.extend(self.build_batch_level_pipeline_stages());
 
         let mut cursor = self.info.aggregate(pipeline).await?;
         let mut levels = Vec::new();
 
         while let Some(result) = cursor.try_next().await? {
-            let level: Level = mongodb::bson::from_document(result)?;
+            let level: BatchLevel = mongodb::bson::from_document(result)?;
             levels.push(level);
         }
 

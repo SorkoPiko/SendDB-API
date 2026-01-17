@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use crate::endpoint::common;
 use crate::model::database::Database;
-use crate::model::info::Level;
+use crate::model::info::{BatchLevel, Level};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 struct BatchLevelRequest {
@@ -13,7 +13,7 @@ struct BatchLevelRequest {
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 struct BatchLevelResponse {
-    pub levels: Vec<Level>,
+    pub levels: Vec<BatchLevel>,
 }
 
 #[utoipa::path(responses(

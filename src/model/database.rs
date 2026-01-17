@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::model::info::Level;
+use crate::model::info::{BatchLevel, Level};
 
 pub fn default_accurate() -> bool {
     true
@@ -38,5 +38,5 @@ pub struct SendItem {
 
 #[async_trait::async_trait]
 pub trait Database: Send + Sync {
-    async fn get_levels_by_ids(&self, level_ids: &[i64]) -> anyhow::Result<Vec<Level>>;
+    async fn get_levels_by_ids(&self, level_ids: &[i64]) -> anyhow::Result<Vec<BatchLevel>>;
     async fn get_level_by_id(&self, level_id: i64) -> anyhow::Result<Option<Level>>; }
