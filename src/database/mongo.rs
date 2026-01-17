@@ -1,7 +1,7 @@
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
-use crate::model::database::{Database, InfoItem, RateItem, SendItem};
+use crate::model::database::{Database, InfoItem, LevelStatItem, RateItem, SendItem};
 use crate::model::info::{BatchLevel, Level};
 
 pub struct MongoDatabase {
@@ -10,6 +10,7 @@ pub struct MongoDatabase {
     info: mongodb::Collection<InfoItem>,
     rates: mongodb::Collection<RateItem>,
     sends: mongodb::Collection<SendItem>,
+    level_stats: mongodb::Collection<LevelStatItem>,
 
     oldest_level: i32,
 }
@@ -25,18 +26,28 @@ impl MongoDatabase {
         let info = db.collection("info");
         let rates = db.collection("rates");
         let sends = db.collection("sends");
+        let level_stats = db.collection("level_stats");
 
         Ok(Self {
             client,
             info,
             rates,
             sends,
+            level_stats,
             oldest_level,
         })
     }
 
     fn build_level_pipeline_stages(&self) -> Vec<Document> {
         vec![
+            doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            },
             doc! {
                 "$lookup": {
                     "from": "sends",
@@ -54,14 +65,6 @@ impl MongoDatabase {
                 }
             },
             doc! {
-                "$lookup": {
-                    "from": "level_stats",
-                    "localField": "_id",
-                    "foreignField": "_id",
-                    "as": "stats"
-                }
-            },
-            doc! {
                 "$project": {
                     "level_id": "$_id",
                     "sends": {
@@ -72,13 +75,13 @@ impl MongoDatabase {
                         }
                     },
                     "accurate": { "$gt": ["$_id", self.oldest_level] },
-                    "platformer": 1,
-                    "length": 1,
-                    "rank": { "$arrayElemAt": ["$stats.rank", 0] },
-                    "rate_rank": { "$arrayElemAt": ["$stats.rate_rank", 0] },
-                    "gamemode_rank": { "$arrayElemAt": ["$stats.gamemode_rank", 0] },
-                    "joined_rank": { "$arrayElemAt": ["$stats.joined_rank", 0] },
-                    "trending_score": { "$arrayElemAt": ["$stats.trending_score", 0] },
+                    "platformer": { "$arrayElemAt": ["$info.platformer", 0] },
+                    "length": { "$arrayElemAt": ["$info.length", 0] },
+                    "rank": "$rank",
+                    "rate_rank": "$rate_rank",
+                    "gamemode_rank": "$gamemode_rank",
+                    "joined_rank": "$joined_rank",
+                    "trending_score": "$trending_score",
                     "rate": {
                         "$cond": {
                             "if": { "$gt": [{ "$size": "$rate" }, 0] },
@@ -100,45 +103,45 @@ impl MongoDatabase {
     fn build_batch_level_pipeline_stages(&self) -> Vec<Document> {
         vec![
             doc! {
-            "$lookup": {
-                "from": "rates",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "rate"
-            }
-        },
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            },
             doc! {
-            "$lookup": {
-                "from": "level_stats",
-                "localField": "_id",
-                "foreignField": "_id",
-                "as": "stats"
-            }
-        },
+                "$lookup": {
+                    "from": "rates",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "rate"
+                }
+            },
             doc! {
-            "$project": {
-                "level_id": "$_id",
-                "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
-                "accurate": { "$gt": ["$_id", self.oldest_level] },
-                "platformer": 1,
-                "length": 1,
-                "rank": { "$arrayElemAt": ["$stats.rank", 0] },
-                "trending_score": { "$arrayElemAt": ["$stats.trending_score", 0] },
-                "rate": {
-                    "$cond": {
-                        "if": { "$gt": [{ "$size": "$rate" }, 0] },
-                        "then": {
-                            "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
-                            "points": { "$arrayElemAt": ["$rate.points", 0] },
-                            "stars": { "$arrayElemAt": ["$rate.stars", 0] },
-                            "timestamp": { "$toLong": { "$arrayElemAt": ["$rate.timestamp", 0] } },
-                            "accurate": { "$arrayElemAt": ["$rate.accurate", 0] }
-                        },
-                        "else": None::<Document>
+                "$project": {
+                    "level_id": "$_id",
+                    "send_count": "$send_count",
+                    "accurate": { "$gt": ["$_id", self.oldest_level] },
+                    "platformer": { "$arrayElemAt": ["$info.platformer", 0] },
+                    "length": { "$arrayElemAt": ["$info.length", 0] },
+                    "rank": "$rank",
+                    "trending_score": "$trending_score",
+                    "rate": {
+                        "$cond": {
+                            "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                            "then": {
+                                "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                                "points": { "$arrayElemAt": ["$rate.points", 0] },
+                                "stars": { "$arrayElemAt": ["$rate.stars", 0] },
+                                "timestamp": { "$toLong": { "$arrayElemAt": ["$rate.timestamp", 0] } },
+                                "accurate": { "$arrayElemAt": ["$rate.accurate", 0] }
+                            },
+                            "else": None::<Document>
+                        }
                     }
                 }
             }
-        }
         ]
     }
 }
@@ -153,7 +156,7 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_batch_level_pipeline_stages());
 
-        let mut cursor = self.info.aggregate(pipeline).await?;
+        let mut cursor = self.level_stats.aggregate(pipeline).await?;
         let mut levels = Vec::new();
 
         while let Some(result) = cursor.try_next().await? {
@@ -171,7 +174,7 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_level_pipeline_stages());
 
-        let mut cursor = self.info.aggregate(pipeline).await?;
+        let mut cursor = self.level_stats.aggregate(pipeline).await?;
 
         if let Some(result) = cursor.try_next().await? {
             let level: Level = mongodb::bson::from_document(result)?;

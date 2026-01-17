@@ -9,6 +9,8 @@ use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, App, HttpServer};
 use actix_web::middleware::Logger;
 use env_logger::{Env};
+use fern::Dispatch;
+use log::LevelFilter;
 use utoipa::openapi::{ContactBuilder, InfoBuilder};
 use utoipa_actix_web::{scope, AppExt};
 use utoipa_swagger_ui::SwaggerUi;
@@ -20,7 +22,10 @@ use crate::model::database::Database;
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenvy::dotenv().ok();
-    env_logger::init_from_env(Env::default().default_filter_or("debug"));
+    setup_logger().map_err(|e| {
+        eprintln!("Failed to initialize logger: {:?}", e);
+        std::io::Error::new(std::io::ErrorKind::Other, "Logger initialization error")
+    })?;
 
     let config = AppConfig::from_env();
     let database: Arc<Mutex<dyn Database>> = Arc::new(Mutex::new(MongoDatabase::new(config.database_url.as_str(), config.oldest_level).await
@@ -70,4 +75,21 @@ async fn main() -> std::io::Result<()> {
         .bind((config_clone.server_address, config_clone.server_port))?
         .run()
         .await
+}
+
+fn setup_logger() -> Result<(), fern::InitError> {
+    Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{} [{}] {}",
+                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                message
+            ))
+        })
+        .level(LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .chain(fern::log_file("output.log")?)
+        .apply()?;
+    Ok(())
 }
