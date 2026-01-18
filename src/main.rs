@@ -6,18 +6,24 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::{web, App, HttpServer};
+use actix_web::{get, web, App, HttpServer, Responder};
 use actix_web::middleware::Logger;
-use env_logger::{Env};
 use fern::Dispatch;
 use log::LevelFilter;
 use utoipa::openapi::{ContactBuilder, InfoBuilder};
 use utoipa_actix_web::{scope, AppExt};
 use utoipa_swagger_ui::SwaggerUi;
 use crate::database::mongo::MongoDatabase;
-use crate::endpoint::level;
 use crate::model::config::AppConfig;
 use crate::model::database::Database;
+
+#[utoipa::path(summary = "Index", responses(
+    (status = 200, description = "API is running")
+))]
+#[get("/")]
+async fn index() -> impl Responder {
+    "SendDB API is running. Visit /swagger-ui/ for API documentation."
+}
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -49,10 +55,14 @@ async fn main() -> std::io::Result<()> {
             .into_utoipa_app()
             .app_data(web::Data::new(database.clone()))
             .app_data(web::Data::new(config.clone()))
+            .service(index)
             .service(scope::scope("/api/v1")
                 .service(scope::scope("/level")
-                    .service(level::batch_level)
-                    .service(level::get_level)
+                    .service(endpoint::level::batch_level)
+                    .service(endpoint::level::get_level)
+                )
+                .service(scope::scope("/creator")
+                    .service(endpoint::creator::get_creator)
                 )
             )
             .openapi_service(|mut api| {

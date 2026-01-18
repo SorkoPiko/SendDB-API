@@ -16,7 +16,7 @@ struct BatchLevelResponse {
     pub levels: Vec<BatchLevel>,
 }
 
-#[utoipa::path(responses(
+#[utoipa::path(summary = "Get batch level data", responses(
     (status = OK, description = "Get batch level data", body = BatchLevelResponse)
 ))]
 #[post("/batch")]
@@ -43,7 +43,7 @@ pub async fn batch_level(
     Ok(HttpResponse::Ok().json(BatchLevelResponse { levels }))
 }
 
-#[utoipa::path(responses(
+#[utoipa::path(summary = "Get level data", responses(
     (status = OK, description = "Get level data", body = Level),
     (status = NOT_FOUND, description = "Level not found")
 ))]
@@ -66,9 +66,8 @@ pub async fn get_level(
             })?
     };
 
-    if let Some(level) = level {
-        Ok(HttpResponse::Ok().json(level))
-    } else {
-        Err(common::not_found("Level"))
+    match level {
+        Some(level) => Ok(HttpResponse::Ok().json(level)),
+        None => Err(common::not_found("Level")),
     }
 }

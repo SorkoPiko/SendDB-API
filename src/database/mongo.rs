@@ -1,8 +1,8 @@
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
-use crate::model::database::{Database, InfoItem, LevelStatItem, RateItem, SendItem};
-use crate::model::info::{BatchLevel, Level};
+use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
+use crate::model::info::{BatchLevel, Creator, Level};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -11,6 +11,7 @@ pub struct MongoDatabase {
     rates: mongodb::Collection<RateItem>,
     sends: mongodb::Collection<SendItem>,
     level_stats: mongodb::Collection<LevelStatItem>,
+    creator_stats: mongodb::Collection<CreatorStatItem>,
 
     oldest_level: i32,
 }
@@ -27,6 +28,7 @@ impl MongoDatabase {
         let rates = db.collection("rates");
         let sends = db.collection("sends");
         let level_stats = db.collection("level_stats");
+        let creator_stats = db.collection("creator_stats");
 
         Ok(Self {
             client,
@@ -34,6 +36,7 @@ impl MongoDatabase {
             rates,
             sends,
             level_stats,
+            creator_stats,
             oldest_level,
         })
     }
@@ -144,6 +147,65 @@ impl MongoDatabase {
             }
         ]
     }
+
+    fn build_creator_pipeline_stages(&self) -> Vec<Document> {
+        vec![
+            doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "creator",
+                    "as": "creator_levels"
+                }
+            },
+            doc! {
+                "$addFields": {
+                    "level_ids": {
+                        "$map": {
+                            "input": "$creator_levels",
+                            "as": "level",
+                            "in": "$$level._id"
+                        }
+                    }
+                }
+            },
+            doc! {
+                "$lookup": {
+                    "from": "level_stats",
+                    "localField": "level_ids",
+                    "foreignField": "_id",
+                    "as": "level_stats_data"
+                }
+            },
+            doc! {
+                "$addFields": {
+                    "levels": {
+                        "$map": {
+                            "input": "$level_stats_data",
+                            "as": "stat",
+                            "in": {
+                                "level_id": "$$stat._id",
+                                "send_count": "$$stat.send_count"
+                            }
+                        }
+                    }
+                }
+            },
+            doc! {
+                "$project": {
+                    "player_id": "$_id",
+                    "account_id": 1,
+                    "levels": 1,
+                    "send_count": 1,
+                    "recent_sends": 1,
+                    "send_count_stddev": 1,
+                    "trending_score": 1,
+                    "latest_send": { "$toLong": "$latest_send" },
+                    "rank": 1
+                }
+            }
+        ]
+    }
 }
 
 #[async_trait::async_trait]
@@ -179,6 +241,23 @@ impl Database for MongoDatabase {
         if let Some(result) = cursor.try_next().await? {
             let level: Level = mongodb::bson::from_document(result)?;
             Ok(Some(level))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn get_creator_by_id(&self, player_id: i64) -> anyhow::Result<Option<Creator>> {
+        let mut pipeline = vec![
+            doc! { "$match": { "_id": player_id as i32 } },
+            doc! { "$limit": 1 }
+        ];
+        pipeline.extend(self.build_creator_pipeline_stages());
+
+        let mut cursor = self.creator_stats.aggregate(pipeline).await?;
+
+        if let Some(result) = cursor.try_next().await? {
+            let creator: Creator = mongodb::bson::from_document(result)?;
+            Ok(Some(creator))
         } else {
             Ok(None)
         }
