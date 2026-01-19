@@ -59,6 +59,7 @@ pub struct Creator {
     recent_sends: i32,
     send_count_stddev: f64,
     trending_score: f64,
+    trending_level_count: i32,
     latest_send: i64,
     rank: i32,
     trending_rank: i32,

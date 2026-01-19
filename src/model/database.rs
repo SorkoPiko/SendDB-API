@@ -64,6 +64,7 @@ pub struct CreatorStatItem {
     #[serde(with = "bson::serde_helpers::datetime::FromI64")]
     latest_send: i64,
     trending_score: f64,
+    trending_level_count: i32,
     recent_sends: i32,
     send_count_stddev: f64,
     send_count_avg: f64,

@@ -201,6 +201,7 @@ impl MongoDatabase {
                     "recent_sends": 1,
                     "send_count_stddev": 1,
                     "trending_score": 1,
+                    "trending_level_count": 1,
                     "latest_send": { "$toLong": "$latest_send" },
                     "rank": 1,
                     "trending_rank": 1
