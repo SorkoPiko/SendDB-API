@@ -80,11 +80,12 @@ impl MongoDatabase {
                     "accurate": { "$gt": ["$_id", self.oldest_level] },
                     "platformer": { "$arrayElemAt": ["$info.platformer", 0] },
                     "length": { "$arrayElemAt": ["$info.length", 0] },
+                    "trending_score": "$trending_score",
                     "rank": "$rank",
                     "rate_rank": "$rate_rank",
                     "gamemode_rank": "$gamemode_rank",
                     "joined_rank": "$joined_rank",
-                    "trending_score": "$trending_score",
+                    "trending_rank": "$trending_rank",
                     "rate": {
                         "$cond": {
                             "if": { "$gt": [{ "$size": "$rate" }, 0] },
@@ -201,7 +202,8 @@ impl MongoDatabase {
                     "send_count_stddev": 1,
                     "trending_score": 1,
                     "latest_send": { "$toLong": "$latest_send" },
-                    "rank": 1
+                    "rank": 1,
+                    "trending_rank": 1
                 }
             }
         ]

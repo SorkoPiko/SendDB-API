@@ -30,10 +30,11 @@ pub struct Level {
     platformer: bool,
     length: i32,
     rank: i32,
+    trending_score: f64,
     rate_rank: i32,
     gamemode_rank: i32,
     joined_rank: i32,
-    trending_score: f64,
+    trending_rank: i32,
     rate: Option<Rate>,
 }
 
@@ -60,4 +61,5 @@ pub struct Creator {
     trending_score: f64,
     latest_send: i64,
     rank: i32,
+    trending_rank: i32,
 }

@@ -51,6 +51,7 @@ pub struct LevelStatItem {
     rate_rank: i32,
     gamemode_rank: i32,
     joined_rank: i32,
+    trending_rank: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -60,15 +61,16 @@ pub struct CreatorStatItem {
     account_id: i32,
     level_count: i32,
     send_count: i32,
+    #[serde(with = "bson::serde_helpers::datetime::FromI64")]
+    latest_send: i64,
+    trending_score: f64,
     recent_sends: i32,
     send_count_stddev: f64,
     send_count_avg: f64,
-    trending_score: f64,
-    #[serde(with = "bson::serde_helpers::datetime::FromI64")]
-    latest_send: i64,
     #[serde(with = "bson::serde_helpers::datetime::FromI64")]
     last_updated: i64,
     rank: i32,
+    trending_rank: i32,
 }
 
 #[async_trait::async_trait]
