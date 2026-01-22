@@ -1,6 +1,8 @@
+use std::time::Duration;
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
+use mongodb::options::ClientOptions;
 use crate::endpoint::leaderboard::{GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
 use crate::model::info::{BatchLevel, Creator, LeaderboardLevel, Level};
@@ -321,7 +323,9 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_batch_level_pipeline_stages());
 
-        let mut cursor = self.level_stats.aggregate(pipeline).await?;
+        let mut cursor = self.level_stats.aggregate(pipeline)
+            .max_time(Duration::from_secs(5))
+            .await?;
         let mut levels = Vec::new();
 
         while let Some(result) = cursor.try_next().await? {
@@ -339,7 +343,9 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_level_pipeline_stages());
 
-        let mut cursor = self.level_stats.aggregate(pipeline).await?;
+        let mut cursor = self.level_stats.aggregate(pipeline)
+            .max_time(Duration::from_secs(5))
+            .await?;
 
         if let Some(result) = cursor.try_next().await? {
             let level: Level = mongodb::bson::from_document(result)?;
@@ -356,7 +362,9 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_creator_pipeline_stages());
 
-        let mut cursor = self.creator_stats.aggregate(pipeline).await?;
+        let mut cursor = self.creator_stats.aggregate(pipeline)
+            .max_time(Duration::from_secs(5))
+            .await?;
 
         if let Some(result) = cursor.try_next().await? {
             let creator: Creator = mongodb::bson::from_document(result)?;
@@ -371,6 +379,7 @@ impl Database for MongoDatabase {
 
         let result = self.level_stats
             .aggregate(pipeline)
+            .max_time(Duration::from_secs(5))
             .await?
             .try_next()
             .await?

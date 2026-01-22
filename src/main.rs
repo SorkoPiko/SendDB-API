@@ -85,6 +85,8 @@ async fn main() -> std::io::Result<()> {
             .split_for_parts();
         app
     })
+        .workers(4)
+        .max_connections(200)
         .bind((config_clone.server_address, config_clone.server_port))?
         .run()
         .await

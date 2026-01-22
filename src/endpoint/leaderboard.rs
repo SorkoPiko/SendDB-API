@@ -45,6 +45,8 @@ pub async fn leaderboard(
         return Ok(HttpResponse::Ok().json(LeaderboardResponse { total: 0, levels: vec![] }));
     } else if query.limit > 50 {
         return Err(common::bad_request("Too many levels"));
+    } else if query.offset < 0 {
+        return Err(common::bad_request("Invalid offset"));
     }
 
     let response = {
