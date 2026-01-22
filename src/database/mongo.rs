@@ -1,8 +1,9 @@
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
+use crate::endpoint::leaderboard::{GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
-use crate::model::info::{BatchLevel, Creator, Level};
+use crate::model::info::{BatchLevel, Creator, LeaderboardLevel, Level};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -209,6 +210,105 @@ impl MongoDatabase {
             }
         ]
     }
+
+    fn build_leaderboard_pipeline_stages(&self, query: &LeaderboardQuery) -> Vec<Document> {
+        let mut stages = vec![
+            doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            },
+            doc! {
+                "$unwind": {
+                    "path": "$info",
+                    "preserveNullAndEmptyArrays": true
+                }
+            }
+        ];
+
+        let mut match_conditions = vec![];
+
+        if let Some(gamemode_filter) = &query.gamemode_filter {
+            match gamemode_filter {
+                GamemodeFilter::Classic => {
+                    match_conditions.push(doc! {
+                        "info.platformer": false
+                    });
+                },
+                GamemodeFilter::Platformer => {
+                    match_conditions.push(doc! {
+                        "info.platformer": true
+                    });
+                }
+            }
+        }
+
+        if let Some(rate_filter) = &query.rate_filter {
+            stages.push(doc! {
+                "$lookup": {
+                    "from": "rates",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "rate"
+                }
+            });
+            match rate_filter {
+                RateFilter::Rated => {
+                    match_conditions.push(doc! {
+                        "rate": { "$ne": [] }
+                    });
+                },
+                RateFilter::Unrated => {
+                    match_conditions.push(doc! {
+                        "rate": { "$eq": [] }
+                    });
+                }
+            }
+        }
+
+        if !match_conditions.is_empty() {
+            stages.push(doc! {
+                "$match": {
+                    "$and": match_conditions
+                }
+            });
+        }
+
+        let rank_field = if query.rate_filter.is_some() && query.gamemode_filter.is_some() {
+            "joined_rank"
+        } else if query.rate_filter.is_some() {
+            "rate_rank"
+        } else if query.gamemode_filter.is_some() {
+            "gamemode_rank"
+        } else {
+            "rank"
+        };
+
+        stages.push(doc! {
+            "$facet": {
+                "metadata": [
+                    { "$count": "total" }
+                ],
+                "data": [
+                    { "$sort": { rank_field: 1 } },
+                    { "$skip": query.offset },
+                    { "$limit": query.limit },
+                    {
+                        "$project": {
+                            "level_id": "$_id",
+                            "send_count": "$send_count",
+                            "rank": format!("${}", rank_field),
+                        }
+                    }
+                ]
+            }
+        });
+
+        stages
+    }
 }
 
 #[async_trait::async_trait]
@@ -264,5 +364,32 @@ impl Database for MongoDatabase {
         } else {
             Ok(None)
         }
+    }
+
+    async fn get_leaderboard_levels(&self, query: &LeaderboardQuery) -> anyhow::Result<LeaderboardResponse> {
+        let pipeline = self.build_leaderboard_pipeline_stages(query);
+
+        let result = self.level_stats
+            .aggregate(pipeline)
+            .await?
+            .try_next()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("No results from aggregation"))?;
+
+        let metadata = result.get_array("metadata")?;
+        let total = metadata
+            .first()
+            .and_then(|doc| doc.as_document())
+            .and_then(|doc| doc.get_i32("total").ok())
+            .unwrap_or(0);
+
+        let data = result.get_array("data")?;
+        let levels: Vec<LeaderboardLevel> = data
+            .iter()
+            .filter_map(|bson| bson.as_document())
+            .filter_map(|doc| mongodb::bson::from_document(doc.clone()).ok())
+            .collect();
+
+        Ok(LeaderboardResponse { total, levels })
     }
 }

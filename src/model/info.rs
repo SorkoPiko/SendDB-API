@@ -64,3 +64,10 @@ pub struct Creator {
     rank: i32,
     trending_rank: i32,
 }
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LeaderboardLevel {
+    level_id: i32,
+    send_count: i32,
+    rank: i32,
+}

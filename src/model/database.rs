@@ -1,5 +1,6 @@
 use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
+use crate::endpoint::leaderboard::{LeaderboardQuery, LeaderboardResponse};
 use crate::model::info::{BatchLevel, Creator, Level};
 
 pub fn default_accurate() -> bool {
@@ -79,4 +80,6 @@ pub trait Database: Send + Sync {
     async fn get_levels_by_ids(&self, level_ids: &[i64]) -> anyhow::Result<Vec<BatchLevel>>;
     async fn get_level_by_id(&self, level_id: i64) -> anyhow::Result<Option<Level>>;
     async fn get_creator_by_id(&self, player_id: i64) -> anyhow::Result<Option<Creator>>;
+
+    async fn get_leaderboard_levels(&self, query: &LeaderboardQuery) -> anyhow::Result<LeaderboardResponse>;
 }

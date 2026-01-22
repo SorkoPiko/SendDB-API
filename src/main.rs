@@ -64,6 +64,9 @@ async fn main() -> std::io::Result<()> {
                 .service(scope::scope("/creator")
                     .service(endpoint::creator::get_creator)
                 )
+                .service(scope::scope("/leaderboard")
+                    .service(endpoint::leaderboard::leaderboard)
+                )
             )
             .openapi_service(|mut api| {
                 api.info = InfoBuilder::new()
