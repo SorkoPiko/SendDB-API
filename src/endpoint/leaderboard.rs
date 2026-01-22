@@ -35,7 +35,7 @@ pub struct LeaderboardResponse {
 #[utoipa::path(summary = "Get leaderboard", responses(
     (status = OK, description = "Get leaderboard", body = LeaderboardResponse)
 ))]
-#[post("/")]
+#[post("")]
 pub async fn leaderboard(
     database: web::Data<Arc<Mutex<dyn Database>>>,
     req: actix_web::HttpRequest,
