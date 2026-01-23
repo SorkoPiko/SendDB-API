@@ -294,7 +294,7 @@ impl MongoDatabase {
                     { "$count": "total" }
                 ],
                 "data": [
-                    { "$sort": { rank_field: 1 } },
+                    { "$sort": { rank_field: 1, "_id": 1 } },
                     { "$skip": query.offset },
                     { "$limit": query.limit },
                     {
