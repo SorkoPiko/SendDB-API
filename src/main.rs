@@ -14,6 +14,7 @@ use utoipa::openapi::{ContactBuilder, InfoBuilder};
 use utoipa_actix_web::{scope, AppExt};
 use utoipa_swagger_ui::SwaggerUi;
 use crate::database::mongo::MongoDatabase;
+use crate::endpoint::ratelimit::IpKeyExtractor;
 use crate::model::config::AppConfig;
 use crate::model::database::Database;
 
@@ -44,6 +45,7 @@ async fn main() -> std::io::Result<()> {
 
     let governor_conf = GovernorConfigBuilder::default()
         .requests_per_minute(60)
+        .key_extractor(IpKeyExtractor)
         .finish()
         .unwrap();
 

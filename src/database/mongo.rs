@@ -2,7 +2,6 @@ use std::time::Duration;
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
-use mongodb::options::ClientOptions;
 use crate::endpoint::leaderboard::{GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
 use crate::model::info::{BatchLevel, Creator, LeaderboardLevel, Level};
