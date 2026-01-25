@@ -71,3 +71,11 @@ pub struct LeaderboardLevel {
     send_count: i32,
     rank: i32,
 }
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct TrendingLeaderboardLevel {
+    level_id: i32,
+    send_count: i32,
+    rank: i32,
+    trending_score: f64,
+}

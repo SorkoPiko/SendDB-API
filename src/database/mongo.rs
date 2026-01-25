@@ -2,9 +2,9 @@ use std::time::Duration;
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
-use crate::endpoint::leaderboard::{GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter};
+use crate::endpoint::leaderboard::{GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
-use crate::model::info::{BatchLevel, Creator, LeaderboardLevel, Level};
+use crate::model::info::{BatchLevel, Creator, LeaderboardLevel, Level, TrendingLeaderboardLevel};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -310,6 +310,36 @@ impl MongoDatabase {
 
         stages
     }
+
+    fn build_trending_pipeline_stages(&self, query: &TrendingLeaderboardQuery) -> Vec<Document> {
+        vec![
+            doc! {
+                "$match": {
+                    "trending_rank": { "$gt": 0 }
+                }
+            },
+            doc! {
+                "$facet": {
+                    "metadata": [
+                        { "$count": "total" }
+                    ],
+                    "data": [
+                        { "$sort": { "trending_rank": 1, "_id": 1 } },
+                        { "$skip": query.offset },
+                        { "$limit": query.limit },
+                        {
+                            "$project": {
+                                "level_id": "$_id",
+                                "send_count": "$send_count",
+                                "rank": "$trending_rank",
+                                "trending_score": "$trending_score",
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    }
 }
 
 #[async_trait::async_trait]
@@ -399,5 +429,33 @@ impl Database for MongoDatabase {
             .collect();
 
         Ok(LeaderboardResponse { total, levels })
+    }
+
+    async fn get_trending_levels(&self, query: &TrendingLeaderboardQuery) -> anyhow::Result<TrendingLeaderboardResponse> {
+        let pipeline = self.build_trending_pipeline_stages(query);
+
+        let result = self.level_stats
+            .aggregate(pipeline)
+            .max_time(Duration::from_secs(5))
+            .await?
+            .try_next()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("No results from aggregation"))?;
+
+        let metadata = result.get_array("metadata")?;
+        let total = metadata
+            .first()
+            .and_then(|doc| doc.as_document())
+            .and_then(|doc| doc.get_i32("total").ok())
+            .unwrap_or(0);
+
+        let data = result.get_array("data")?;
+        let levels: Vec<TrendingLeaderboardLevel> = data
+            .iter()
+            .filter_map(|bson| bson.as_document())
+            .filter_map(|doc| mongodb::bson::from_document(doc.clone()).ok())
+            .collect();
+
+        Ok(TrendingLeaderboardResponse { total, levels })
     }
 }
