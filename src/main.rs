@@ -51,7 +51,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let (app, _) = App::new()
-            .wrap(Logger::default())
+            .wrap(Logger::new(r#"%{X-Real-IP}i "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#))
             .wrap(Cors::permissive())
             .wrap(Governor::new(&governor_conf))
             .into_utoipa_app()
