@@ -69,6 +69,7 @@ async fn main() -> std::io::Result<()> {
                 .service(scope::scope("/leaderboard")
                     .service(endpoint::leaderboard::leaderboard)
                     .service(endpoint::leaderboard::trending_leaderboard)
+                    .service(endpoint::leaderboard::creator_leaderboard)
                 )
             )
             .openapi_service(|mut api| {

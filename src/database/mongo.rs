@@ -2,9 +2,9 @@ use std::time::Duration;
 use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
-use crate::endpoint::leaderboard::{GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
+use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
-use crate::model::info::{BatchLevel, Creator, LeaderboardLevel, Level, TrendingLeaderboardLevel};
+use crate::model::info::{BatchLevel, Creator, LeaderboardCreator, LeaderboardLevel, Level, TrendingLeaderboardLevel};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -340,6 +340,43 @@ impl MongoDatabase {
             }
         ]
     }
+
+    fn build_creator_leaderboard_pipeline_stages(&self, query: &CreatorLeaderboardQuery) -> Vec<Document> {
+        vec![
+            doc! {
+                "$lookup": {
+                    "from": "creators",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "creator_info"
+                }
+            },
+            doc! {
+                "$facet": {
+                    "metadata": [
+                        { "$count": "total" }
+                    ],
+                    "data": [
+                        { "$sort": { "rank": 1, "_id": 1 } },
+                        { "$skip": query.offset },
+                        { "$limit": query.limit },
+                        {
+                            "$project": {
+                                "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                                "player_id": "$_id",
+                                "account_id": 1,
+                                "level_count": 1,
+                                "send_count": 1,
+                                "trending_score": 1,
+                                "rank": 1,
+                                "trending_rank": 1
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    }
 }
 
 #[async_trait::async_trait]
@@ -457,5 +494,33 @@ impl Database for MongoDatabase {
             .collect();
 
         Ok(TrendingLeaderboardResponse { total, levels })
+    }
+
+    async fn get_creators(&self, query: &CreatorLeaderboardQuery) -> anyhow::Result<CreatorLeaderboardResponse> {
+        let pipeline = self.build_creator_leaderboard_pipeline_stages(query);
+
+        let result = self.creator_stats
+            .aggregate(pipeline)
+            .max_time(Duration::from_secs(5))
+            .await?
+            .try_next()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("No results from aggregation"))?;
+
+        let metadata = result.get_array("metadata")?;
+        let total = metadata
+            .first()
+            .and_then(|doc| doc.as_document())
+            .and_then(|doc| doc.get_i32("total").ok())
+            .unwrap_or(0);
+
+        let data = result.get_array("data")?;
+        let creators: Vec<LeaderboardCreator> = data
+            .iter()
+            .filter_map(|bson| bson.as_document())
+            .filter_map(|doc| mongodb::bson::from_document(doc.clone()).ok())
+            .collect();
+
+        Ok(CreatorLeaderboardResponse { total, creators: creators })
     }
 }

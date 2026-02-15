@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use crate::endpoint::common;
 use crate::model::database::Database;
-use crate::model::info::{LeaderboardLevel, TrendingLeaderboardLevel};
+use crate::model::info::{LeaderboardCreator, LeaderboardLevel, TrendingLeaderboardLevel};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub enum RateFilter {
@@ -32,6 +32,12 @@ pub struct TrendingLeaderboardQuery {
     pub offset: i32,
 }
 
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub struct CreatorLeaderboardQuery {
+    pub limit: i32,
+    pub offset: i32,
+}
+
 #[derive(Debug, Serialize, utoipa::ToSchema)]
 pub struct LeaderboardResponse {
     pub total: i32,
@@ -42,6 +48,12 @@ pub struct LeaderboardResponse {
 pub struct TrendingLeaderboardResponse {
     pub total: i32,
     pub levels: Vec<TrendingLeaderboardLevel>,
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub struct CreatorLeaderboardResponse {
+    pub total: i32,
+    pub creators: Vec<LeaderboardCreator>,
 }
 
 #[utoipa::path(summary = "Get leaderboard", responses(
@@ -74,7 +86,7 @@ pub async fn leaderboard(
 }
 
 #[utoipa::path(summary = "Get trending leaderboard", responses(
-    (status = OK, description = "Get trending leaderboard", body = LeaderboardResponse)
+    (status = OK, description = "Get trending leaderboard", body = TrendingLeaderboardResponse)
 ))]
 #[post("/trending")]
 pub async fn trending_leaderboard(
@@ -93,6 +105,35 @@ pub async fn trending_leaderboard(
     let response = {
         let db = database.lock().await;
         db.get_trending_levels(&query).await
+            .map_err(|e| {
+                log::error!("{:?}", e);
+                common::internal_server_error("Database error")
+            })?
+    };
+
+    Ok(HttpResponse::Ok().json(response))
+}
+
+#[utoipa::path(summary = "Get creator leaderboard", responses(
+    (status = OK, description = "Get creator leaderboard", body = CreatorLeaderboardResponse)
+))]
+#[post("/creators")]
+pub async fn creator_leaderboard(
+    database: web::Data<Arc<Mutex<dyn Database>>>,
+    req: actix_web::HttpRequest,
+    query: web::Json<CreatorLeaderboardQuery>,
+) -> Result<HttpResponse, actix_web::Error> {
+    if query.limit <= 0 {
+        return Ok(HttpResponse::Ok().json(CreatorLeaderboardResponse { total: 0, creators: vec![] }));
+    } else if query.limit > 50 {
+        return Err(common::bad_request("Too many creators"));
+    } else if query.offset < 0 {
+        return Err(common::bad_request("Invalid offset"));
+    }
+
+    let response = {
+        let db = database.lock().await;
+        db.get_creators(&query).await
             .map_err(|e| {
                 log::error!("{:?}", e);
                 common::internal_server_error("Database error")
