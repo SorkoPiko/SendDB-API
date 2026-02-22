@@ -52,7 +52,16 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         let (app, _) = App::new()
             .wrap(Logger::new(r#"%{X-Real-IP}i "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#))
-            .wrap(Cors::permissive())
+            .wrap(
+                Cors::default()
+                    .allowed_origin("https://senddb.dev")
+                    .allowed_methods(vec!["GET", "POST"])
+                    .allowed_headers(vec![
+                        actix_web::http::header::ACCEPT,
+                        actix_web::http::header::CONTENT_TYPE,
+                    ])
+                    .max_age(3600)
+            )
             .wrap(Governor::new(&governor_conf))
             .into_utoipa_app()
             .app_data(web::Data::new(database.clone()))
