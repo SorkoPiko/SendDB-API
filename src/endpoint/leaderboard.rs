@@ -24,18 +24,21 @@ pub struct LeaderboardQuery {
     pub offset: i32,
     pub rate_filter: Option<RateFilter>,
     pub gamemode_filter: Option<GamemodeFilter>,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct TrendingLeaderboardQuery {
     pub limit: i32,
     pub offset: i32,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct CreatorLeaderboardQuery {
     pub limit: i32,
     pub offset: i32,
+    pub search: Option<String>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]

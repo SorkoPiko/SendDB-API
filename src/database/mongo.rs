@@ -70,8 +70,21 @@ impl MongoDatabase {
                 }
             },
             doc! {
+                "$lookup": {
+                    "from": "creators",
+                    "localField": "info.creator",
+                    "foreignField": "_id",
+                    "as": "creator_info"
+                }
+            },
+            doc! {
                 "$project": {
                     "level_id": "$_id",
+                    "name": { "$arrayElemAt": ["$info.name", 0] },
+                    "creator": {
+                        "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                        "player_id": { "$arrayElemAt": ["$info.creator", 0] }
+                    },
                     "sends": {
                         "$map": {
                             "input": "$sends",
@@ -196,6 +209,7 @@ impl MongoDatabase {
             },
             doc! {
                 "$project": {
+                    "name": 1,
                     "player_id": "$_id",
                     "account_id": 1,
                     "levels": 1,
@@ -213,71 +227,6 @@ impl MongoDatabase {
     }
 
     fn build_leaderboard_pipeline_stages(&self, query: &LeaderboardQuery) -> Vec<Document> {
-        let mut stages = vec![
-            doc! {
-                "$lookup": {
-                    "from": "info",
-                    "localField": "_id",
-                    "foreignField": "_id",
-                    "as": "info"
-                }
-            },
-            doc! {
-                "$unwind": {
-                    "path": "$info",
-                    "preserveNullAndEmptyArrays": true
-                }
-            }
-        ];
-
-        let mut match_conditions = vec![];
-
-        if let Some(gamemode_filter) = &query.gamemode_filter {
-            match gamemode_filter {
-                GamemodeFilter::Classic => {
-                    match_conditions.push(doc! {
-                        "info.platformer": false
-                    });
-                },
-                GamemodeFilter::Platformer => {
-                    match_conditions.push(doc! {
-                        "info.platformer": true
-                    });
-                }
-            }
-        }
-
-        if let Some(rate_filter) = &query.rate_filter {
-            stages.push(doc! {
-                "$lookup": {
-                    "from": "rates",
-                    "localField": "_id",
-                    "foreignField": "_id",
-                    "as": "rate"
-                }
-            });
-            match rate_filter {
-                RateFilter::Rated => {
-                    match_conditions.push(doc! {
-                        "rate": { "$ne": [] }
-                    });
-                },
-                RateFilter::Unrated => {
-                    match_conditions.push(doc! {
-                        "rate": { "$eq": [] }
-                    });
-                }
-            }
-        }
-
-        if !match_conditions.is_empty() {
-            stages.push(doc! {
-                "$match": {
-                    "$and": match_conditions
-                }
-            });
-        }
-
         let rank_field = if query.rate_filter.is_some() && query.gamemode_filter.is_some() {
             "joined_rank"
         } else if query.rate_filter.is_some() {
@@ -288,23 +237,158 @@ impl MongoDatabase {
             "rank"
         };
 
+        let needs_info = query.gamemode_filter.is_some() || query.search.as_ref().map_or(false, |s| !s.trim().is_empty());
+        let needs_rate = query.rate_filter.is_some();
+
+        let mut pre_facet_stages: Vec<Document> = vec![];
+
+        if needs_info {
+            pre_facet_stages.push(doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            });
+            pre_facet_stages.push(doc! {
+                "$unwind": {
+                    "path": "$info",
+                    "preserveNullAndEmptyArrays": true
+                }
+            });
+        }
+
+        if let Some(search) = &query.search && needs_info {
+            if let Ok(level_id) = search.parse::<i32>() && level_id > 100000 {
+                pre_facet_stages.push(doc! {
+                    "$match": { "_id": level_id }
+                });
+            } else {
+                pre_facet_stages.push(doc! {
+                    "$match": {
+                        "info.name": {
+                            "$regex": search,
+                            "$options": "i"
+                        }
+                    }
+                });
+            }
+        }
+
+        if needs_rate {
+            pre_facet_stages.push(doc! {
+                "$lookup": {
+                    "from": "rates",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "rate"
+                }
+            });
+        }
+
+        let mut match_conditions: Vec<Document> = vec![];
+
+        if let Some(gamemode_filter) = &query.gamemode_filter {
+            match gamemode_filter {
+                GamemodeFilter::Classic => {
+                    match_conditions.push(doc! { "info.platformer": false });
+                }
+                GamemodeFilter::Platformer => {
+                    match_conditions.push(doc! { "info.platformer": true });
+                }
+            }
+        }
+
+        if let Some(rate_filter) = &query.rate_filter {
+            match rate_filter {
+                RateFilter::Rated => {
+                    match_conditions.push(doc! { "rate": { "$ne": [] } });
+                }
+                RateFilter::Unrated => {
+                    match_conditions.push(doc! { "rate": { "$eq": [] } });
+                }
+            }
+        }
+
+        if !match_conditions.is_empty() {
+            pre_facet_stages.push(doc! {
+                "$match": { "$and": match_conditions }
+            });
+        }
+
+        let info_lookup_in_facet = if needs_info {
+            vec![
+                doc! {
+                    "$lookup": {
+                        "from": "creators",
+                        "localField": "info.creator",
+                        "foreignField": "_id",
+                        "as": "creator_info"
+                    }
+                },
+                doc! {
+                    "$project": {
+                        "name": "$info.name",
+                        "level_id": "$_id",
+                        "send_count": "$send_count",
+                        "rank": format!("${}", rank_field),
+                        "creator": {
+                            "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                            "player_id": "$info.creator"
+                        }
+                    }
+                }
+            ]
+        } else {
+            vec![
+                doc! {
+                    "$lookup": {
+                        "from": "info",
+                        "localField": "_id",
+                        "foreignField": "_id",
+                        "as": "info"
+                    }
+                },
+                doc! {
+                    "$lookup": {
+                        "from": "creators",
+                        "localField": "info.creator",
+                        "foreignField": "_id",
+                        "as": "creator_info"
+                    }
+                },
+                doc! {
+                    "$project": {
+                        "name": { "$arrayElemAt": ["$info.name", 0] },
+                        "level_id": "$_id",
+                        "send_count": "$send_count",
+                        "rank": format!("${}", rank_field),
+                        "creator": {
+                            "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                            "player_id": { "$arrayElemAt": ["$info.creator", 0] }
+                        }
+                    }
+                }
+            ]
+        };
+
+        let mut facet_data_stages: Vec<mongodb::bson::Bson> = vec![
+            doc! { "$sort": { rank_field: 1, "_id": 1 } }.into(),
+            doc! { "$skip": query.offset }.into(),
+            doc! { "$limit": query.limit }.into(),
+        ];
+        for stage in info_lookup_in_facet {
+            facet_data_stages.push(stage.into());
+        }
+
+        let mut stages = pre_facet_stages;
         stages.push(doc! {
             "$facet": {
                 "metadata": [
                     { "$count": "total" }
                 ],
-                "data": [
-                    { "$sort": { rank_field: 1, "_id": 1 } },
-                    { "$skip": query.offset },
-                    { "$limit": query.limit },
-                    {
-                        "$project": {
-                            "level_id": "$_id",
-                            "send_count": "$send_count",
-                            "rank": format!("${}", rank_field),
-                        }
-                    }
-                ]
+                "data": facet_data_stages
             }
         });
 
@@ -312,70 +396,194 @@ impl MongoDatabase {
     }
 
     fn build_trending_pipeline_stages(&self, query: &TrendingLeaderboardQuery) -> Vec<Document> {
-        vec![
+        let needs_info = query.search.as_ref().map_or(false, |s| !s.trim().is_empty());
+
+        let mut stages: Vec<Document> = vec![
             doc! {
                 "$match": {
                     "trending_rank": { "$gt": 0 }
                 }
             },
-            doc! {
-                "$facet": {
-                    "metadata": [
-                        { "$count": "total" }
-                    ],
-                    "data": [
-                        { "$sort": { "trending_rank": 1, "_id": 1 } },
-                        { "$skip": query.offset },
-                        { "$limit": query.limit },
-                        {
-                            "$project": {
-                                "level_id": "$_id",
-                                "send_count": "$send_count",
-                                "rank": "$trending_rank",
-                                "trending_score": "$trending_score",
+        ];
+
+        if needs_info {
+            stages.push(doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            });
+            stages.push(doc! {
+                "$unwind": {
+                    "path": "$info",
+                    "preserveNullAndEmptyArrays": true
+                }
+            });
+
+            if let Some(search) = &query.search && needs_info {
+                if let Ok(level_id) = search.parse::<i32>() && level_id > 100000 {
+                    stages.push(doc! { "$match": { "_id": level_id } });
+                } else {
+                    stages.push(doc! {
+                        "$match": {
+                            "info.name": {
+                                "$regex": search,
+                                "$options": "i"
                             }
                         }
-                    ]
+                    });
                 }
             }
-        ]
+        }
+
+        let mut data_facet_stages: Vec<mongodb::bson::Bson> = vec![
+            doc! { "$sort": { "trending_rank": 1, "_id": 1 } }.into(),
+            doc! { "$skip": query.offset }.into(),
+            doc! { "$limit": query.limit }.into()
+        ];
+
+        if !needs_info  {
+            data_facet_stages.push(doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            }.into());
+            data_facet_stages.push(doc! {
+                "$unwind": {
+                    "path": "$info",
+                    "preserveNullAndEmptyArrays": true
+                }
+            }.into());
+        };
+
+        data_facet_stages.push(doc! {
+            "$lookup": {
+                "from": "creators",
+                "localField": "info.creator",
+                "foreignField": "_id",
+                "as": "creator_info"
+            }
+        }.into());
+        data_facet_stages.push(doc! {
+            "$project": {
+                "name": "$info.name",
+                "level_id": "$_id",
+                "send_count": "$send_count",
+                "creator": {
+                    "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                    "player_id": "$info.creator"
+                },
+                "rank": "$trending_rank",
+                "trending_score": "$trending_score",
+            }
+        }.into());
+
+        stages.push(doc! {
+            "$facet": {
+                "metadata": [
+                    { "$count": "total" }
+                ],
+                "data": data_facet_stages
+            }
+        });
+
+        stages
     }
 
     fn build_creator_leaderboard_pipeline_stages(&self, query: &CreatorLeaderboardQuery) -> Vec<Document> {
-        vec![
-            doc! {
+        let needs_name = query.search.as_ref().map_or(false, |s| !s.trim().is_empty());
+
+        let mut stages: Vec<Document> = vec![];
+
+        if needs_name {
+            stages.push(doc! {
                 "$lookup": {
                     "from": "creators",
                     "localField": "_id",
                     "foreignField": "_id",
                     "as": "creator_info"
                 }
-            },
-            doc! {
-                "$facet": {
-                    "metadata": [
-                        { "$count": "total" }
-                    ],
-                    "data": [
-                        { "$sort": { "rank": 1, "_id": 1 } },
-                        { "$skip": query.offset },
-                        { "$limit": query.limit },
-                        {
-                            "$project": {
-                                "name": { "$arrayElemAt": ["$creator_info.name", 0] },
-                                "player_id": "$_id",
-                                "account_id": 1,
-                                "level_count": 1,
-                                "send_count": 1,
-                                "trending_score": 1,
-                                "rank": 1,
-                                "trending_rank": 1
+            });
+            stages.push(doc! {
+                "$unwind": {
+                    "path": "$creator_info",
+                    "preserveNullAndEmptyArrays": true
+                }
+            });
+
+            if let Some(search) = &query.search && needs_name {
+                if let Ok(player_id) = search.parse::<i32>() && player_id > 100000 {
+                    stages.push(doc! { "$match": { "_id": player_id } });
+                } else {
+                    stages.push(doc! {
+                        "$match": {
+                            "creator_info.name": {
+                                "$regex": search,
+                                "$options": "i"
                             }
                         }
-                    ]
+                    });
                 }
             }
-        ]
+        }
+
+        let mut data_facet_stages: Vec<mongodb::bson::Bson> = vec![
+            doc! { "$sort": { "rank": 1, "_id": 1 } }.into(),
+            doc! { "$skip": query.offset }.into(),
+            doc! { "$limit": query.limit }.into()
+        ];
+
+        if needs_name {
+            data_facet_stages.push(doc! {
+                "$project": {
+                    "name": "$creator_info.name",
+                    "player_id": "$_id",
+                    "account_id": 1,
+                    "level_count": 1,
+                    "send_count": 1,
+                    "trending_score": 1,
+                    "rank": 1,
+                    "trending_rank": 1
+                }
+            }.into());
+        } else {
+            data_facet_stages.push(doc! {
+                "$lookup": {
+                    "from": "creators",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "creator_info"
+                }
+            }.into());
+            data_facet_stages.push(doc! {
+                "$project": {
+                    "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                    "player_id": "$_id",
+                    "account_id": 1,
+                    "level_count": 1,
+                    "send_count": 1,
+                    "trending_score": 1,
+                    "rank": 1,
+                    "trending_rank": 1
+                }
+            }.into());
+        };
+
+        stages.push(doc! {
+            "$facet": {
+                "metadata": [
+                    { "$count": "total" }
+                ],
+                "data": data_facet_stages
+            }
+        });
+
+        stages
     }
 }
 

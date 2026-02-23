@@ -8,8 +8,15 @@ pub struct Send {
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreatorLevel {
+    name: String,
     level_id: i32,
     send_count: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LevelCreator {
+    name: String,
+    player_id: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -24,7 +31,9 @@ pub struct Rate {
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Level {
+    name: String,
     level_id: i32,
+    creator: LevelCreator,
     sends: Vec<Send>,
     accurate: bool,
     platformer: bool,
@@ -52,6 +61,7 @@ pub struct BatchLevel {
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Creator {
+    name: String,
     player_id: i32,
     account_id: i32,
     levels: Vec<CreatorLevel>,
@@ -67,14 +77,18 @@ pub struct Creator {
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LeaderboardLevel {
+    name: String,
     level_id: i32,
+    creator: LevelCreator,
     send_count: i32,
     rank: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct TrendingLeaderboardLevel {
+    name: String,
     level_id: i32,
+    creator: LevelCreator,
     send_count: i32,
     rank: i32,
     trending_score: f64,
