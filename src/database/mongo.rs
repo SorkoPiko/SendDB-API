@@ -201,15 +201,36 @@ impl MongoDatabase {
                             "as": "stat",
                             "in": {
                                 "level_id": "$$stat._id",
-                                "send_count": "$$stat.send_count"
+                                "send_count": "$$stat.send_count",
+                                "name": {
+                                    "$reduce": {
+                                        "input": "$creator_levels",
+                                        "initialValue": null,
+                                        "in": {
+                                            "$cond": {
+                                                "if": { "$eq": ["$$this._id", "$$stat._id"] },
+                                                "then": "$$this.name",
+                                                "else": "$$value"
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             },
             doc! {
+                "$lookup": {
+                    "from": "creators",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "creator_info"
+                }
+            },
+            doc! {
                 "$project": {
-                    "name": 1,
+                    "name": { "$arrayElemAt": ["$creator_info.name", 0] },
                     "player_id": "$_id",
                     "account_id": 1,
                     "levels": 1,
@@ -669,6 +690,7 @@ impl Database for MongoDatabase {
             .await?;
 
         if let Some(result) = cursor.try_next().await? {
+            log::info!("Raw creator document: {:?}", result);
             let creator: Creator = mongodb::bson::from_document(result)?;
             Ok(Some(creator))
         } else {
