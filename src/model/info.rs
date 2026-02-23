@@ -30,6 +30,13 @@ pub struct Rate {
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LeaderboardRate {
+    difficulty: i32,
+    points: i32,
+    stars: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Level {
     name: String,
     level_id: i32,
@@ -82,6 +89,8 @@ pub struct LeaderboardLevel {
     creator: LevelCreator,
     send_count: i32,
     rank: i32,
+    platformer: bool,
+    rate: Option<LeaderboardRate>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -92,6 +101,8 @@ pub struct TrendingLeaderboardLevel {
     send_count: i32,
     rank: i32,
     trending_score: f64,
+    platformer: bool,
+    rate: Option<LeaderboardRate>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]

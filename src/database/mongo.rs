@@ -317,61 +317,86 @@ impl MongoDatabase {
             });
         }
 
-        let info_lookup_in_facet = if needs_info {
-            vec![
-                doc! {
-                    "$lookup": {
-                        "from": "creators",
-                        "localField": "info.creator",
-                        "foreignField": "_id",
-                        "as": "creator_info"
-                    }
-                },
-                doc! {
-                    "$project": {
-                        "name": "$info.name",
-                        "level_id": "$_id",
-                        "send_count": "$send_count",
-                        "rank": format!("${}", rank_field),
-                        "creator": {
-                            "name": { "$arrayElemAt": ["$creator_info.name", 0] },
-                            "player_id": "$info.creator"
+        let mut info_lookup_in_facet = vec![];
+        if !needs_rate {
+            info_lookup_in_facet.push(doc! {
+                "$lookup": {
+                    "from": "rates",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "rate"
+                }
+            });
+        }
+
+        info_lookup_in_facet.push(doc! {
+            "$lookup": {
+                "from": "creators",
+                "localField": "info.creator",
+                "foreignField": "_id",
+                "as": "creator_info"
+            }
+        });
+
+        if needs_info {
+            info_lookup_in_facet.push(doc! {
+                "$project": {
+                    "name": "$info.name",
+                    "level_id": "$_id",
+                    "send_count": "$send_count",
+                    "rank": format!("${}", rank_field),
+                    "creator": {
+                        "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                        "player_id": "$info.creator"
+                    },
+                    "platformer": "$info.platformer",
+                    "rate": {
+                        "$cond": {
+                            "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                            "then": {
+                                "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                                "points": { "$arrayElemAt": ["$rate.points", 0] },
+                                "stars": { "$arrayElemAt": ["$rate.stars", 0] }
+                            },
+                            "else": None::<Document>
                         }
                     }
                 }
-            ]
+            });
         } else {
-            vec![
-                doc! {
-                    "$lookup": {
-                        "from": "info",
-                        "localField": "_id",
-                        "foreignField": "_id",
-                        "as": "info"
-                    }
-                },
-                doc! {
-                    "$lookup": {
-                        "from": "creators",
-                        "localField": "info.creator",
-                        "foreignField": "_id",
-                        "as": "creator_info"
-                    }
-                },
-                doc! {
-                    "$project": {
-                        "name": { "$arrayElemAt": ["$info.name", 0] },
-                        "level_id": "$_id",
-                        "send_count": "$send_count",
-                        "rank": format!("${}", rank_field),
-                        "creator": {
-                            "name": { "$arrayElemAt": ["$creator_info.name", 0] },
-                            "player_id": { "$arrayElemAt": ["$info.creator", 0] }
+            info_lookup_in_facet.push(doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            });
+            info_lookup_in_facet.push(doc! {
+                "$project": {
+                    "name": { "$arrayElemAt": ["$info.name", 0] },
+                    "level_id": "$_id",
+                    "send_count": "$send_count",
+                    "rank": format!("${}", rank_field),
+                    "creator": {
+                        "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                        "player_id": { "$arrayElemAt": ["$info.creator", 0] }
+                    },
+                    "platformer": { "$arrayElemAt": ["$info.platformer", 0] },
+                    "rate": {
+                        "$cond": {
+                            "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                            "then": {
+                                "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                                "points": { "$arrayElemAt": ["$rate.points", 0] },
+                                "stars": { "$arrayElemAt": ["$rate.stars", 0] }
+                            },
+                            "else": None::<Document>
                         }
                     }
                 }
-            ]
-        };
+            });
+        }
 
         let mut facet_data_stages: Vec<mongodb::bson::Bson> = vec![
             doc! { "$sort": { rank_field: 1, "_id": 1 } }.into(),
@@ -438,10 +463,10 @@ impl MongoDatabase {
             }
         }
 
-        let mut data_facet_stages: Vec<mongodb::bson::Bson> = vec![
-            doc! { "$sort": { "trending_rank": 1, "_id": 1 } }.into(),
-            doc! { "$skip": query.offset }.into(),
-            doc! { "$limit": query.limit }.into()
+        let mut data_facet_stages: Vec<Document> = vec![
+            doc! { "$sort": { "trending_rank": 1, "_id": 1 } },
+            doc! { "$skip": query.offset },
+            doc! { "$limit": query.limit }
         ];
 
         if !needs_info  {
@@ -452,13 +477,13 @@ impl MongoDatabase {
                     "foreignField": "_id",
                     "as": "info"
                 }
-            }.into());
+            });
             data_facet_stages.push(doc! {
                 "$unwind": {
                     "path": "$info",
                     "preserveNullAndEmptyArrays": true
                 }
-            }.into());
+            });
         };
 
         data_facet_stages.push(doc! {
@@ -468,7 +493,15 @@ impl MongoDatabase {
                 "foreignField": "_id",
                 "as": "creator_info"
             }
-        }.into());
+        });
+        data_facet_stages.push(doc! {
+            "$lookup": {
+                "from": "rates",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "rate"
+            }
+        });
         data_facet_stages.push(doc! {
             "$project": {
                 "name": "$info.name",
@@ -480,8 +513,20 @@ impl MongoDatabase {
                 },
                 "rank": "$trending_rank",
                 "trending_score": "$trending_score",
+                "platformer": "$info.platformer",
+                "rate": {
+                    "$cond": {
+                        "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                        "then": {
+                            "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                            "points": { "$arrayElemAt": ["$rate.points", 0] },
+                            "stars": { "$arrayElemAt": ["$rate.stars", 0] }
+                        },
+                        "else": None::<Document>
+                    }
+                }
             }
-        }.into());
+        });
 
         stages.push(doc! {
             "$facet": {
@@ -532,10 +577,10 @@ impl MongoDatabase {
             }
         }
 
-        let mut data_facet_stages: Vec<mongodb::bson::Bson> = vec![
-            doc! { "$sort": { "rank": 1, "_id": 1 } }.into(),
-            doc! { "$skip": query.offset }.into(),
-            doc! { "$limit": query.limit }.into()
+        let mut data_facet_stages: Vec<Document> = vec![
+            doc! { "$sort": { "rank": 1, "_id": 1 } },
+            doc! { "$skip": query.offset },
+            doc! { "$limit": query.limit }
         ];
 
         if needs_name {
@@ -550,7 +595,7 @@ impl MongoDatabase {
                     "rank": 1,
                     "trending_rank": 1
                 }
-            }.into());
+            });
         } else {
             data_facet_stages.push(doc! {
                 "$lookup": {
@@ -559,7 +604,7 @@ impl MongoDatabase {
                     "foreignField": "_id",
                     "as": "creator_info"
                 }
-            }.into());
+            });
             data_facet_stages.push(doc! {
                 "$project": {
                     "name": { "$arrayElemAt": ["$creator_info.name", 0] },
@@ -571,7 +616,7 @@ impl MongoDatabase {
                     "rank": 1,
                     "trending_rank": 1
                 }
-            }.into());
+            });
         };
 
         stages.push(doc! {
