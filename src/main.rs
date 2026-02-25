@@ -49,6 +49,13 @@ async fn main() -> std::io::Result<()> {
         .finish()
         .unwrap();
 
+    let governor_daily_conf = GovernorConfigBuilder::default()
+        .seconds_per_request(86400 / 5000)
+        .burst_size(5000)
+        .key_extractor(IpKeyExtractor)
+        .finish()
+        .unwrap();
+
     HttpServer::new(move || {
         let (app, _) = App::new()
             .wrap(Logger::new(r#"%{X-Real-IP}i "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#))
@@ -63,6 +70,7 @@ async fn main() -> std::io::Result<()> {
                     .max_age(3600)
             )
             .wrap(Governor::new(&governor_conf))
+            .wrap(Governor::new(&governor_daily_conf))
             .into_utoipa_app()
             .app_data(web::Data::new(database.clone()))
             .app_data(web::Data::new(config.clone()))
