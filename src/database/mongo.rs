@@ -742,6 +742,7 @@ impl MongoDatabase {
                 "name": 1,
                 "account_id": { "$arrayElemAt": ["$stats.account_id", 0] },
                 "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
+                "level_count": { "$arrayElemAt": ["$stats.level_count", 0] },
                 "rank": { "$arrayElemAt": ["$stats.rank", 0] }
             }
         });

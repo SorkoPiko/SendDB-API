@@ -146,6 +146,7 @@ pub struct SearchCreator {
     pub name: String,
     pub account_id: i32,
     pub send_count: i32,
+    pub level_count: i32,
     pub rank: i32,
     #[serde(skip_serializing)]
     #[serde(default = "default_relevance")]
