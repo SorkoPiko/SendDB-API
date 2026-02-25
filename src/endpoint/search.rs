@@ -3,7 +3,6 @@ use actix_web::{post, web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use crate::endpoint::common;
-use crate::endpoint::leaderboard::{TrendingLeaderboardQuery, TrendingLeaderboardResponse};
 use crate::model::database::Database;
 use crate::model::info::SearchResult;
 

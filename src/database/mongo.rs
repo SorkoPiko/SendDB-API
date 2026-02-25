@@ -15,6 +15,7 @@ pub struct MongoDatabase {
     sends: mongodb::Collection<SendItem>,
     level_stats: mongodb::Collection<LevelStatItem>,
     creator_stats: mongodb::Collection<CreatorStatItem>,
+    creators: mongodb::Collection<Document>,
 
     oldest_level: i32,
 }
@@ -32,6 +33,7 @@ impl MongoDatabase {
         let sends = db.collection("sends");
         let level_stats = db.collection("level_stats");
         let creator_stats = db.collection("creator_stats");
+        let creators = db.collection("creators");
 
         Ok(Self {
             client,
@@ -40,6 +42,7 @@ impl MongoDatabase {
             sends,
             level_stats,
             creator_stats,
+            creators,
             oldest_level,
         })
     }
@@ -683,30 +686,27 @@ impl MongoDatabase {
         } else {
             doc! {
                 "$match": {
-                    "info.name": { "$regex": search, "$options": "i" }
+                    "name": { "$regex": search, "$options": "i" }
                 }
             }
         };
 
-        let mut pipeline = vec![
-            doc! {
-                "$lookup": {
-                    "from": "info",
-                    "localField": "_id",
-                    "foreignField": "_id",
-                    "as": "info"
-                }
-            },
-            doc! { "$unwind": { "path": "$info", "preserveNullAndEmptyArrays": false } },
-            match_stage,
-        ];
+        let mut pipeline = vec![match_stage];
 
         if is_id.is_none() {
-            pipeline.extend(Self::build_search_relevance_stages(search, "info.name", "_id"));
+            pipeline.extend(Self::build_search_relevance_stages(search, "name", "_id"));
         }
 
         pipeline.push(doc! { "$limit": limit });
 
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "level_stats",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "stats"
+            }
+        });
         pipeline.push(doc! {
             "$lookup": {
                 "from": "rates",
@@ -718,7 +718,7 @@ impl MongoDatabase {
         pipeline.push(doc! {
             "$lookup": {
                 "from": "creators",
-                "localField": "info.creator",
+                "localField": "creator",
                 "foreignField": "_id",
                 "as": "creator_info"
             }
@@ -726,12 +726,12 @@ impl MongoDatabase {
         pipeline.push(doc! {
             "$project": {
                 "level_id": "$_id",
-                "name": "$info.name",
-                "platformer": "$info.platformer",
+                "name": 1,
+                "platformer": 1,
                 "relevance": { "$ifNull": ["$relevance", 3] },
                 "creator": {
                     "name": { "$arrayElemAt": ["$creator_info.name", 0] },
-                    "player_id": "$info.creator"
+                    "player_id": "$creator"
                 },
                 "rate": {
                     "$cond": {
@@ -757,37 +757,34 @@ impl MongoDatabase {
         } else {
             doc! {
                 "$match": {
-                    "creator_info.name": { "$regex": search, "$options": "i" }
+                    "name": { "$regex": search, "$options": "i" }
                 }
             }
         };
 
-        let mut pipeline = vec![
-            doc! {
-                "$lookup": {
-                    "from": "creators",
-                    "localField": "_id",
-                    "foreignField": "_id",
-                    "as": "creator_info"
-                }
-            },
-            doc! { "$unwind": { "path": "$creator_info", "preserveNullAndEmptyArrays": false } },
-            match_stage,
-        ];
+        let mut pipeline = vec![match_stage];
 
         if is_id.is_none() {
-            pipeline.extend(Self::build_search_relevance_stages(search, "creator_info.name", "_id"));
+            pipeline.extend(Self::build_search_relevance_stages(search, "name", "_id"));
         }
 
         pipeline.push(doc! { "$limit": limit });
 
         pipeline.push(doc! {
+            "$lookup": {
+                "from": "creator_stats",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "stats"
+            }
+        });
+        pipeline.push(doc! {
             "$project": {
                 "player_id": "$_id",
-                "name": "$creator_info.name",
-                "account_id": 1,
-                "send_count": 1,
-                "rank": 1,
+                "name": 1,
+                "account_id": { "$arrayElemAt": ["$stats.account_id", 0] },
+                "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
+                "rank": { "$arrayElemAt": ["$stats.rank", 0] },
                 "relevance": { "$ifNull": ["$relevance", 3] }
             }
         });
@@ -950,8 +947,8 @@ impl Database for MongoDatabase {
         let creator_pipeline = self.build_creator_search_pipeline(search, limit);
 
         let (level_cursor, creator_cursor) = tokio::try_join!(
-            self.level_stats.aggregate(level_pipeline).max_time(Duration::from_secs(5)),
-            self.creator_stats.aggregate(creator_pipeline).max_time(Duration::from_secs(5))
+            self.info.aggregate(level_pipeline).max_time(Duration::from_secs(5)),
+            self.creators.aggregate(creator_pipeline).max_time(Duration::from_secs(5))
         )?;
 
         let (level_docs, creator_docs): (Vec<_>, Vec<_>) = tokio::try_join!(
