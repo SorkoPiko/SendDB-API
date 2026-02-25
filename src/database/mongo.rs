@@ -1,10 +1,13 @@
 use std::time::Duration;
 use anyhow::Context;
 use futures::TryStreamExt;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use mongodb::bson::{doc, Document};
 use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
+use crate::endpoint::search::{SearchQuery, SearchResponse};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
-use crate::model::info::{BatchLevel, Creator, LeaderboardCreator, LeaderboardLevel, Level, TrendingLeaderboardLevel};
+use crate::model::info::{BatchLevel, Creator, LeaderboardCreator, LeaderboardLevel, Level, SearchCreator, SearchLevel, SearchResult, TrendingLeaderboardLevel};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -14,6 +17,7 @@ pub struct MongoDatabase {
     sends: mongodb::Collection<SendItem>,
     level_stats: mongodb::Collection<LevelStatItem>,
     creator_stats: mongodb::Collection<CreatorStatItem>,
+    creators: mongodb::Collection<Document>,
 
     oldest_level: i32,
 }
@@ -31,6 +35,7 @@ impl MongoDatabase {
         let sends = db.collection("sends");
         let level_stats = db.collection("level_stats");
         let creator_stats = db.collection("creator_stats");
+        let creators = db.collection("creators");
 
         Ok(Self {
             client,
@@ -39,6 +44,7 @@ impl MongoDatabase {
             sends,
             level_stats,
             creator_stats,
+            creators,
             oldest_level,
         })
     }
@@ -634,6 +640,112 @@ impl MongoDatabase {
 
         stages
     }
+
+    fn build_level_search_pipeline(&self, search: &str, limit: i64) -> Vec<Document> {
+        let is_id = search.parse::<i32>().ok().filter(|&id| id > 100000);
+
+        let match_stage = if let Some(id) = is_id {
+            doc! { "$match": { "_id": id } }
+        } else {
+            doc! {
+                "$match": {
+                    "name": { "$regex": regex::escape(search), "$options": "i" }
+                }
+            }
+        };
+
+        let mut pipeline = vec![match_stage];
+
+        let candidate_limit = if is_id.is_some() { 1i64 } else { limit * 5 };
+        pipeline.push(doc! { "$limit": candidate_limit });
+
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "level_stats",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "stats"
+            }
+        });
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "rates",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "rate"
+            }
+        });
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "creators",
+                "localField": "creator",
+                "foreignField": "_id",
+                "as": "creator_info"
+            }
+        });
+        pipeline.push(doc! {
+            "$project": {
+                "level_id": "$_id",
+                "name": 1,
+                "platformer": 1,
+                "creator": {
+                    "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                    "player_id": "$creator"
+                },
+                "rate": {
+                    "$cond": {
+                        "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                        "then": {
+                            "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                            "stars": { "$arrayElemAt": ["$rate.stars", 0] }
+                        },
+                        "else": None::<Document>
+                    }
+                }
+            }
+        });
+
+        pipeline
+    }
+
+    fn build_creator_search_pipeline(&self, search: &str, limit: i64) -> Vec<Document> {
+        let is_id = search.parse::<i32>().ok().filter(|&id| id > 100000);
+
+        let match_stage = if let Some(id) = is_id {
+            doc! { "$match": { "_id": id } }
+        } else {
+            doc! {
+                "$match": {
+                    "name": { "$regex": regex::escape(search), "$options": "i" }
+                }
+            }
+        };
+
+        let mut pipeline = vec![match_stage];
+
+        let candidate_limit = if is_id.is_some() { 1i64 } else { limit * 5 };
+        pipeline.push(doc! { "$limit": candidate_limit });
+
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "creator_stats",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "stats"
+            }
+        });
+        pipeline.push(doc! {
+            "$project": {
+                "player_id": "$_id",
+                "name": 1,
+                "account_id": { "$arrayElemAt": ["$stats.account_id", 0] },
+                "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
+                "rank": { "$arrayElemAt": ["$stats.rank", 0] }
+            }
+        });
+
+        pipeline
+    }
 }
 
 #[async_trait::async_trait]
@@ -779,6 +891,83 @@ impl Database for MongoDatabase {
             .filter_map(|doc| mongodb::bson::from_document(doc.clone()).ok())
             .collect();
 
-        Ok(CreatorLeaderboardResponse { total, creators: creators })
+        Ok(CreatorLeaderboardResponse { total, creators })
+    }
+
+    async fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResponse> {
+        let search = query.search.trim();
+        let limit = query.limit.min(100);
+
+        let level_pipeline = self.build_level_search_pipeline(search, limit);
+        let creator_pipeline = self.build_creator_search_pipeline(search, limit);
+
+        let (level_cursor, creator_cursor) = tokio::try_join!(
+            self.info.aggregate(level_pipeline).max_time(Duration::from_secs(5)),
+            self.creators.aggregate(creator_pipeline).max_time(Duration::from_secs(5))
+        )?;
+
+        let (level_docs, creator_docs): (Vec<_>, Vec<_>) = tokio::try_join!(
+            level_cursor.try_collect(),
+            creator_cursor.try_collect()
+        )?;
+
+        let matcher = SkimMatcherV2::default();
+        let mut levels: Vec<SearchResult> = Vec::new();
+        let mut creators: Vec<SearchResult> = Vec::new();
+
+        for doc in level_docs {
+            if let Ok(mut level) = mongodb::bson::from_document::<SearchLevel>(doc) {
+                level.relevance = matcher
+                    .fuzzy_match(&level.name, search)
+                    .unwrap_or(0) as f64;
+                levels.push(SearchResult::Level(level));
+            }
+        }
+
+        for doc in creator_docs {
+            if let Ok(mut creator) = mongodb::bson::from_document::<SearchCreator>(doc) {
+                creator.relevance = creator.name.as_deref()
+                    .and_then(|name| matcher.fuzzy_match(name, search))
+                    .unwrap_or(0) as f64;
+                creators.push(SearchResult::Creator(creator));
+            }
+        }
+
+        let relevance = |r: &SearchResult| match r {
+            SearchResult::Level(l) => l.relevance,
+            SearchResult::Creator(c) => c.relevance,
+        };
+
+        levels.sort_by(|a, b| relevance(b).partial_cmp(&relevance(a)).unwrap_or(std::cmp::Ordering::Equal));
+        creators.sort_by(|a, b| relevance(b).partial_cmp(&relevance(a)).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut results: Vec<SearchResult> = Vec::with_capacity(levels.len() + creators.len());
+        let mut li = levels.into_iter().peekable();
+        let mut ci = creators.into_iter().peekable();
+
+        loop {
+            let lr = li.peek().map(relevance);
+            let cr = ci.peek().map(relevance);
+            match (lr, cr) {
+                (None, None) => break,
+                (Some(_), None) => results.extend(&mut li),
+                (None, Some(_)) => results.extend(&mut ci),
+                (Some(l), Some(c)) => {
+                    if (l - c).abs() < f64::EPSILON {
+                        results.push(li.next().unwrap());
+                        results.push(ci.next().unwrap());
+                    } else if l > c {
+                        results.push(li.next().unwrap());
+                    } else {
+                        results.push(ci.next().unwrap());
+                    }
+                }
+            }
+        }
+
+        results.truncate(limit as usize);
+        let total = results.len() as i32;
+
+        Ok(SearchResponse { total, results })
     }
 }

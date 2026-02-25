@@ -22,7 +22,6 @@ struct BatchLevelResponse {
 #[post("/batch")]
 pub async fn batch_level(
     database: web::Data<Arc<Mutex<dyn Database>>>,
-    req: actix_web::HttpRequest,
     batch: web::Json<BatchLevelRequest>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if batch.level_ids.is_empty() {
@@ -50,7 +49,6 @@ pub async fn batch_level(
 #[get("/{level_id}")]
 pub async fn get_level(
     database: web::Data<Arc<Mutex<dyn Database>>>,
-    req: actix_web::HttpRequest,
     level_id: web::Path<i64>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if (*level_id) < 0 {

@@ -1,6 +1,7 @@
 use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
 use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, LeaderboardQuery, LeaderboardResponse, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
+use crate::endpoint::search::{SearchQuery, SearchResponse};
 use crate::model::info::{BatchLevel, Creator, Level};
 
 pub fn default_accurate() -> bool {
@@ -84,4 +85,6 @@ pub trait Database: Send + Sync {
     async fn get_leaderboard_levels(&self, query: &LeaderboardQuery) -> anyhow::Result<LeaderboardResponse>;
     async fn get_trending_levels(&self, query: &TrendingLeaderboardQuery) -> anyhow::Result<TrendingLeaderboardResponse>;
     async fn get_creators(&self, query: &CreatorLeaderboardQuery) -> anyhow::Result<CreatorLeaderboardResponse>;
+
+    async fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResponse>;
 }
