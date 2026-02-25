@@ -80,6 +80,9 @@ async fn main() -> std::io::Result<()> {
                     .service(endpoint::leaderboard::trending_leaderboard)
                     .service(endpoint::leaderboard::creator_leaderboard)
                 )
+                .service(scope::scope("/search")
+                    .service(endpoint::search::search)
+                )
             )
             .openapi_service(|mut api| {
                 api.info = InfoBuilder::new()

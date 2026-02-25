@@ -3,8 +3,9 @@ use anyhow::Context;
 use futures::TryStreamExt;
 use mongodb::bson::{doc, Document};
 use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
+use crate::endpoint::search::{SearchQuery, SearchResponse};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
-use crate::model::info::{BatchLevel, Creator, LeaderboardCreator, LeaderboardLevel, Level, TrendingLeaderboardLevel};
+use crate::model::info::{BatchLevel, Creator, LeaderboardCreator, LeaderboardLevel, Level, SearchCreator, SearchLevel, SearchResult, TrendingLeaderboardLevel};
 
 pub struct MongoDatabase {
     client: mongodb::Client,
@@ -634,6 +635,165 @@ impl MongoDatabase {
 
         stages
     }
+
+    fn build_search_relevance_stages(search: &str, name_field: &str, id_field: &str) -> Vec<Document> {
+        vec![
+            doc! {
+                "$addFields": {
+                    "relevance": {
+                        "$switch": {
+                            "branches": [
+                                {
+                                    "case": { "$eq": [{ "$toLower": format!("${}", name_field) }, search.to_lowercase()] },
+                                    "then": 3
+                                },
+                                {
+                                    "case": {
+                                        "$regexMatch": {
+                                            "input": { "$toLower": format!("${}", name_field) },
+                                            "regex": format!("^{}", regex::escape(search).to_lowercase())
+                                        }
+                                    },
+                                    "then": 2
+                                },
+                                {
+                                    "case": {
+                                        "$regexMatch": {
+                                            "input": { "$toLower": format!("${}", name_field) },
+                                            "regex": regex::escape(search).to_lowercase()
+                                        }
+                                    },
+                                    "then": 1
+                                }
+                            ],
+                            "default": 0
+                        }
+                    }
+                }
+            },
+            doc! { "$sort": { "relevance": -1, id_field: 1 } }
+        ]
+    }
+
+    fn build_level_search_pipeline(&self, search: &str, limit: i64) -> Vec<Document> {
+        let is_id = search.parse::<i32>().ok().filter(|&id| id > 100000);
+
+        let match_stage = if let Some(id) = is_id {
+            doc! { "$match": { "_id": id } }
+        } else {
+            doc! {
+                "$match": {
+                    "info.name": { "$regex": search, "$options": "i" }
+                }
+            }
+        };
+
+        let mut pipeline = vec![
+            doc! {
+                "$lookup": {
+                    "from": "info",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "info"
+                }
+            },
+            doc! { "$unwind": { "path": "$info", "preserveNullAndEmptyArrays": false } },
+            match_stage,
+        ];
+
+        if is_id.is_none() {
+            pipeline.extend(Self::build_search_relevance_stages(search, "info.name", "_id"));
+        }
+
+        pipeline.push(doc! { "$limit": limit });
+
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "rates",
+                "localField": "_id",
+                "foreignField": "_id",
+                "as": "rate"
+            }
+        });
+        pipeline.push(doc! {
+            "$lookup": {
+                "from": "creators",
+                "localField": "info.creator",
+                "foreignField": "_id",
+                "as": "creator_info"
+            }
+        });
+        pipeline.push(doc! {
+            "$project": {
+                "level_id": "$_id",
+                "name": "$info.name",
+                "platformer": "$info.platformer",
+                "relevance": { "$ifNull": ["$relevance", 3] },
+                "creator": {
+                    "name": { "$arrayElemAt": ["$creator_info.name", 0] },
+                    "player_id": "$info.creator"
+                },
+                "rate": {
+                    "$cond": {
+                        "if": { "$gt": [{ "$size": "$rate" }, 0] },
+                        "then": {
+                            "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
+                            "stars": { "$arrayElemAt": ["$rate.stars", 0] }
+                        },
+                        "else": None::<Document>
+                    }
+                }
+            }
+        });
+
+        pipeline
+    }
+
+    fn build_creator_search_pipeline(&self, search: &str, limit: i64) -> Vec<Document> {
+        let is_id = search.parse::<i32>().ok().filter(|&id| id > 100000);
+
+        let match_stage = if let Some(id) = is_id {
+            doc! { "$match": { "_id": id } }
+        } else {
+            doc! {
+                "$match": {
+                    "creator_info.name": { "$regex": search, "$options": "i" }
+                }
+            }
+        };
+
+        let mut pipeline = vec![
+            doc! {
+                "$lookup": {
+                    "from": "creators",
+                    "localField": "_id",
+                    "foreignField": "_id",
+                    "as": "creator_info"
+                }
+            },
+            doc! { "$unwind": { "path": "$creator_info", "preserveNullAndEmptyArrays": false } },
+            match_stage,
+        ];
+
+        if is_id.is_none() {
+            pipeline.extend(Self::build_search_relevance_stages(search, "creator_info.name", "_id"));
+        }
+
+        pipeline.push(doc! { "$limit": limit });
+
+        pipeline.push(doc! {
+            "$project": {
+                "player_id": "$_id",
+                "name": "$creator_info.name",
+                "account_id": 1,
+                "send_count": 1,
+                "rank": 1,
+                "relevance": { "$ifNull": ["$relevance", 3] }
+            }
+        });
+
+        pipeline
+    }
 }
 
 #[async_trait::async_trait]
@@ -779,6 +939,49 @@ impl Database for MongoDatabase {
             .filter_map(|doc| mongodb::bson::from_document(doc.clone()).ok())
             .collect();
 
-        Ok(CreatorLeaderboardResponse { total, creators: creators })
+        Ok(CreatorLeaderboardResponse { total, creators })
+    }
+
+    async fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResponse> {
+        let search = query.search.trim();
+        let limit = query.limit.min(100);
+
+        let level_pipeline = self.build_level_search_pipeline(search, limit);
+        let creator_pipeline = self.build_creator_search_pipeline(search, limit);
+
+        let (level_cursor, creator_cursor) = tokio::try_join!(
+            self.level_stats.aggregate(level_pipeline).max_time(Duration::from_secs(5)),
+            self.creator_stats.aggregate(creator_pipeline).max_time(Duration::from_secs(5))
+        )?;
+
+        let (level_docs, creator_docs): (Vec<_>, Vec<_>) = tokio::try_join!(
+            level_cursor.try_collect(),
+            creator_cursor.try_collect()
+        )?;
+
+        let mut results: Vec<SearchResult> = Vec::new();
+
+        for doc in level_docs {
+            if let Ok(level) = mongodb::bson::from_document::<SearchLevel>(doc) {
+                results.push(SearchResult::Level(level));
+            }
+        }
+
+        for doc in creator_docs {
+            if let Ok(creator) = mongodb::bson::from_document::<SearchCreator>(doc) {
+                results.push(SearchResult::Creator(creator));
+            }
+        }
+
+        results.sort_by(|a, b| {
+            let rel_a = match a { SearchResult::Level(l) => l.relevance, SearchResult::Creator(c) => c.relevance };
+            let rel_b = match b { SearchResult::Level(l) => l.relevance, SearchResult::Creator(c) => c.relevance };
+            rel_b.partial_cmp(&rel_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        results.truncate(limit as usize);
+        let total = results.len() as i32;
+
+        Ok(SearchResponse { total, results })
     }
 }

@@ -12,7 +12,6 @@ use crate::model::info::Creator;
 #[get("/{player_id}")]
 pub async fn get_creator(
     database: web::Data<Arc<Mutex<dyn Database>>>,
-    req: actix_web::HttpRequest,
     player_id: web::Path<i64>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if (*player_id) < 0 {

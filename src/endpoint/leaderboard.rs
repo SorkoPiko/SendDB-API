@@ -65,13 +65,12 @@ pub struct CreatorLeaderboardResponse {
 #[post("")]
 pub async fn leaderboard(
     database: web::Data<Arc<Mutex<dyn Database>>>,
-    req: actix_web::HttpRequest,
     query: web::Json<LeaderboardQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
         return Ok(HttpResponse::Ok().json(LeaderboardResponse { total: 0, levels: vec![] }));
     } else if query.limit > 50 {
-        return Err(common::bad_request("Too many levels"));
+        return Err(common::bad_request("Too many levels requested"));
     } else if query.offset < 0 {
         return Err(common::bad_request("Invalid offset"));
     }
@@ -94,13 +93,12 @@ pub async fn leaderboard(
 #[post("/trending")]
 pub async fn trending_leaderboard(
     database: web::Data<Arc<Mutex<dyn Database>>>,
-    req: actix_web::HttpRequest,
     query: web::Json<TrendingLeaderboardQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
         return Ok(HttpResponse::Ok().json(TrendingLeaderboardResponse { total: 0, levels: vec![] }));
     } else if query.limit > 50 {
-        return Err(common::bad_request("Too many levels"));
+        return Err(common::bad_request("Too many levels requested"));
     } else if query.offset < 0 {
         return Err(common::bad_request("Invalid offset"));
     }
@@ -123,13 +121,12 @@ pub async fn trending_leaderboard(
 #[post("/creators")]
 pub async fn creator_leaderboard(
     database: web::Data<Arc<Mutex<dyn Database>>>,
-    req: actix_web::HttpRequest,
     query: web::Json<CreatorLeaderboardQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
         return Ok(HttpResponse::Ok().json(CreatorLeaderboardResponse { total: 0, creators: vec![] }));
     } else if query.limit > 50 {
-        return Err(common::bad_request("Too many creators"));
+        return Err(common::bad_request("Too many creators requested"));
     } else if query.offset < 0 {
         return Err(common::bad_request("Invalid offset"));
     }
