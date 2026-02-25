@@ -1,6 +1,8 @@
 use std::time::Duration;
 use anyhow::Context;
 use futures::TryStreamExt;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use mongodb::bson::{doc, Document};
 use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
 use crate::endpoint::search::{SearchQuery, SearchResponse};
@@ -639,45 +641,6 @@ impl MongoDatabase {
         stages
     }
 
-    fn build_search_relevance_stages(search: &str, name_field: &str, id_field: &str) -> Vec<Document> {
-        vec![
-            doc! {
-                "$addFields": {
-                    "relevance": {
-                        "$switch": {
-                            "branches": [
-                                {
-                                    "case": { "$eq": [{ "$toLower": format!("${}", name_field) }, search.to_lowercase()] },
-                                    "then": 3
-                                },
-                                {
-                                    "case": {
-                                        "$regexMatch": {
-                                            "input": { "$toLower": format!("${}", name_field) },
-                                            "regex": format!("^{}", regex::escape(search).to_lowercase())
-                                        }
-                                    },
-                                    "then": 2
-                                },
-                                {
-                                    "case": {
-                                        "$regexMatch": {
-                                            "input": { "$toLower": format!("${}", name_field) },
-                                            "regex": regex::escape(search).to_lowercase()
-                                        }
-                                    },
-                                    "then": 1
-                                }
-                            ],
-                            "default": 0
-                        }
-                    }
-                }
-            },
-            doc! { "$sort": { "relevance": -1, id_field: 1 } }
-        ]
-    }
-
     fn build_level_search_pipeline(&self, search: &str, limit: i64) -> Vec<Document> {
         let is_id = search.parse::<i32>().ok().filter(|&id| id > 100000);
 
@@ -686,18 +649,15 @@ impl MongoDatabase {
         } else {
             doc! {
                 "$match": {
-                    "name": { "$regex": search, "$options": "i" }
+                    "name": { "$regex": regex::escape(search), "$options": "i" }
                 }
             }
         };
 
         let mut pipeline = vec![match_stage];
 
-        if is_id.is_none() {
-            pipeline.extend(Self::build_search_relevance_stages(search, "name", "_id"));
-        }
-
-        pipeline.push(doc! { "$limit": limit });
+        let candidate_limit = if is_id.is_some() { 1i64 } else { limit * 5 };
+        pipeline.push(doc! { "$limit": candidate_limit });
 
         pipeline.push(doc! {
             "$lookup": {
@@ -728,7 +688,6 @@ impl MongoDatabase {
                 "level_id": "$_id",
                 "name": 1,
                 "platformer": 1,
-                "relevance": { "$ifNull": ["$relevance", 3] },
                 "creator": {
                     "name": { "$arrayElemAt": ["$creator_info.name", 0] },
                     "player_id": "$creator"
@@ -757,18 +716,15 @@ impl MongoDatabase {
         } else {
             doc! {
                 "$match": {
-                    "name": { "$regex": search, "$options": "i" }
+                    "name": { "$regex": regex::escape(search), "$options": "i" }
                 }
             }
         };
 
         let mut pipeline = vec![match_stage];
 
-        if is_id.is_none() {
-            pipeline.extend(Self::build_search_relevance_stages(search, "name", "_id"));
-        }
-
-        pipeline.push(doc! { "$limit": limit });
+        let candidate_limit = if is_id.is_some() { 1i64 } else { limit * 5 };
+        pipeline.push(doc! { "$limit": candidate_limit });
 
         pipeline.push(doc! {
             "$lookup": {
@@ -784,8 +740,7 @@ impl MongoDatabase {
                 "name": 1,
                 "account_id": { "$arrayElemAt": ["$stats.account_id", 0] },
                 "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
-                "rank": { "$arrayElemAt": ["$stats.rank", 0] },
-                "relevance": { "$ifNull": ["$relevance", 3] }
+                "rank": { "$arrayElemAt": ["$stats.rank", 0] }
             }
         });
 
@@ -956,25 +911,59 @@ impl Database for MongoDatabase {
             creator_cursor.try_collect()
         )?;
 
-        let mut results: Vec<SearchResult> = Vec::new();
+        let matcher = SkimMatcherV2::default();
+        let mut levels: Vec<SearchResult> = Vec::new();
+        let mut creators: Vec<SearchResult> = Vec::new();
 
         for doc in level_docs {
-            if let Ok(level) = mongodb::bson::from_document::<SearchLevel>(doc) {
-                results.push(SearchResult::Level(level));
+            if let Ok(mut level) = mongodb::bson::from_document::<SearchLevel>(doc) {
+                level.relevance = matcher
+                    .fuzzy_match(&level.name, search)
+                    .unwrap_or(0) as f64;
+                levels.push(SearchResult::Level(level));
             }
         }
 
         for doc in creator_docs {
-            if let Ok(creator) = mongodb::bson::from_document::<SearchCreator>(doc) {
-                results.push(SearchResult::Creator(creator));
+            if let Ok(mut creator) = mongodb::bson::from_document::<SearchCreator>(doc) {
+                creator.relevance = creator.name.as_deref()
+                    .and_then(|name| matcher.fuzzy_match(name, search))
+                    .unwrap_or(0) as f64;
+                creators.push(SearchResult::Creator(creator));
             }
         }
 
-        results.sort_by(|a, b| {
-            let rel_a = match a { SearchResult::Level(l) => l.relevance, SearchResult::Creator(c) => c.relevance };
-            let rel_b = match b { SearchResult::Level(l) => l.relevance, SearchResult::Creator(c) => c.relevance };
-            rel_b.partial_cmp(&rel_a).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        let relevance = |r: &SearchResult| match r {
+            SearchResult::Level(l) => l.relevance,
+            SearchResult::Creator(c) => c.relevance,
+        };
+
+        levels.sort_by(|a, b| relevance(b).partial_cmp(&relevance(a)).unwrap_or(std::cmp::Ordering::Equal));
+        creators.sort_by(|a, b| relevance(b).partial_cmp(&relevance(a)).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut results: Vec<SearchResult> = Vec::with_capacity(levels.len() + creators.len());
+        let mut li = levels.into_iter().peekable();
+        let mut ci = creators.into_iter().peekable();
+
+        loop {
+            let lr = li.peek().map(relevance);
+            let cr = ci.peek().map(relevance);
+            match (lr, cr) {
+                (None, None) => break,
+                (Some(_), None) => results.extend(&mut li),
+                (None, Some(_)) => results.extend(&mut ci),
+                (Some(l), Some(c)) => {
+                    if (l - c).abs() < f64::EPSILON {
+                        results.push(li.next().unwrap());
+                        results.push(ci.next().unwrap());
+                    } else if l > c {
+                        results.push(li.next().unwrap());
+                    } else {
+                        results.push(ci.next().unwrap());
+                    }
+                }
+            }
+        }
 
         results.truncate(limit as usize);
         let total = results.len() as i32;

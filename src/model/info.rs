@@ -124,6 +124,10 @@ pub enum SearchResult {
     Creator(SearchCreator),
 }
 
+fn default_relevance() -> f64 {
+    0.0
+}
+
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SearchLevel {
     pub level_id: i32,
@@ -132,6 +136,7 @@ pub struct SearchLevel {
     pub rate: Option<SearchResultRate>,
     pub platformer: Option<bool>,
     #[serde(skip_serializing)]
+    #[serde(default = "default_relevance")]
     pub relevance: f64,
 }
 
@@ -143,6 +148,7 @@ pub struct SearchCreator {
     pub send_count: Option<i32>,
     pub rank: Option<i32>,
     #[serde(skip_serializing)]
+    #[serde(default = "default_relevance")]
     pub relevance: f64,
 }
 
