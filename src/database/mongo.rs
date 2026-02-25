@@ -687,6 +687,7 @@ impl MongoDatabase {
             "$project": {
                 "level_id": "$_id",
                 "name": 1,
+                "send_count": { "$arrayElemAt": ["$stats.send_count", 0] },
                 "platformer": 1,
                 "creator": {
                     "name": { "$arrayElemAt": ["$creator_info.name", 0] },
@@ -697,7 +698,8 @@ impl MongoDatabase {
                         "if": { "$gt": [{ "$size": "$rate" }, 0] },
                         "then": {
                             "difficulty": { "$arrayElemAt": ["$rate.difficulty", 0] },
-                            "stars": { "$arrayElemAt": ["$rate.stars", 0] }
+                            "stars": { "$arrayElemAt": ["$rate.stars", 0] },
+                            "points": { "$arrayElemAt": ["$rate.points", 0] }
                         },
                         "else": None::<Document>
                     }
@@ -926,9 +928,7 @@ impl Database for MongoDatabase {
 
         for doc in creator_docs {
             if let Ok(mut creator) = mongodb::bson::from_document::<SearchCreator>(doc) {
-                creator.relevance = creator.name.as_deref()
-                    .and_then(|name| matcher.fuzzy_match(name, search))
-                    .unwrap_or(0) as f64;
+                creator.relevance = matcher.fuzzy_match(creator.name.as_str(), search).unwrap_or(0) as f64;
                 creators.push(SearchResult::Creator(creator));
             }
         }

@@ -118,10 +118,9 @@ pub struct LeaderboardCreator {
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SearchResult {
-    Level(SearchLevel),
-    Creator(SearchCreator),
+pub struct SearchResultCreator {
+    pub name: String,
+    pub player_id: i32,
 }
 
 fn default_relevance() -> f64 {
@@ -132,9 +131,10 @@ fn default_relevance() -> f64 {
 pub struct SearchLevel {
     pub level_id: i32,
     pub name: String,
-    pub creator: Option<SearchResultCreator>,
-    pub rate: Option<SearchResultRate>,
-    pub platformer: Option<bool>,
+    pub send_count: i32,
+    pub creator: SearchResultCreator,
+    pub rate: Option<LeaderboardRate>,
+    pub platformer: bool,
     #[serde(skip_serializing)]
     #[serde(default = "default_relevance")]
     pub relevance: f64,
@@ -143,23 +143,18 @@ pub struct SearchLevel {
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SearchCreator {
     pub player_id: i32,
-    pub name: Option<String>,
-    pub account_id: Option<i32>,
-    pub send_count: Option<i32>,
-    pub rank: Option<i32>,
+    pub name: String,
+    pub account_id: i32,
+    pub send_count: i32,
+    pub rank: i32,
     #[serde(skip_serializing)]
     #[serde(default = "default_relevance")]
     pub relevance: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct SearchResultCreator {
-    pub name: Option<String>,
-    pub player_id: Option<i32>,
-}
-
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct SearchResultRate {
-    pub difficulty: Option<String>,
-    pub stars: Option<i32>,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SearchResult {
+    Level(SearchLevel),
+    Creator(SearchCreator),
 }
