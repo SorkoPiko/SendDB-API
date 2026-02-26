@@ -7,7 +7,8 @@ use tokio::sync::Mutex;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{get, web, App, HttpServer, Responder};
-use actix_web::middleware::Logger;
+use actix_web::middleware::{from_fn, Logger};
+use actix_web_prom::PrometheusMetricsBuilder;
 use fern::Dispatch;
 use log::LevelFilter;
 use utoipa::openapi::{ContactBuilder, InfoBuilder};
@@ -56,6 +57,11 @@ async fn main() -> std::io::Result<()> {
         .finish()
         .unwrap();
 
+    let prometheus = PrometheusMetricsBuilder::new("senddb_api")
+        .endpoint("/metrics")
+        .build()
+        .unwrap();
+
     HttpServer::new(move || {
         let (app, _) = App::new()
             .wrap(Logger::new(r#"%{X-Real-IP}i "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#))
@@ -69,8 +75,10 @@ async fn main() -> std::io::Result<()> {
                     ])
                     .max_age(3600)
             )
+            .wrap(prometheus.clone())
             .wrap(Governor::new(&governor_conf))
             .wrap(Governor::new(&governor_daily_conf))
+            .wrap(from_fn(endpoint::metrics::metrics_ip_filter))
             .into_utoipa_app()
             .app_data(web::Data::new(database.clone()))
             .app_data(web::Data::new(config.clone()))
