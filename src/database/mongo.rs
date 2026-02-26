@@ -805,7 +805,6 @@ impl Database for MongoDatabase {
             .await?;
 
         if let Some(result) = cursor.try_next().await? {
-            log::info!("Raw creator document: {:?}", result);
             let creator: Creator = mongodb::bson::from_document(result)?;
             Ok(Some(creator))
         } else {
