@@ -1,4 +1,5 @@
 use mongodb::bson::doc;
+use prometheus::core::{AtomicU64, GenericCounterVec};
 use serde::{Deserialize, Serialize};
 use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, LeaderboardQuery, LeaderboardResponse, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
 use crate::endpoint::search::{SearchQuery, SearchResponse};
@@ -84,7 +85,9 @@ pub trait Database: Send + Sync {
 
     async fn get_leaderboard_levels(&self, query: &LeaderboardQuery) -> anyhow::Result<LeaderboardResponse>;
     async fn get_trending_levels(&self, query: &TrendingLeaderboardQuery) -> anyhow::Result<TrendingLeaderboardResponse>;
-    async fn get_creators(&self, query: &CreatorLeaderboardQuery) -> anyhow::Result<CreatorLeaderboardResponse>;
+    async fn get_creator_leaderboard(&self, query: &CreatorLeaderboardQuery) -> anyhow::Result<CreatorLeaderboardResponse>;
 
     async fn search(&self, query: &SearchQuery) -> anyhow::Result<SearchResponse>;
+
+    async fn register_hits_counter(&mut self, stat: GenericCounterVec<AtomicU64>) -> anyhow::Result<()>;
 }

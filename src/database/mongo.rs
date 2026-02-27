@@ -4,6 +4,7 @@ use futures::TryStreamExt;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use mongodb::bson::{doc, Document};
+use prometheus::core::{AtomicU64, GenericCounterVec};
 use crate::endpoint::leaderboard::{CreatorLeaderboardQuery, CreatorLeaderboardResponse, GamemodeFilter, LeaderboardQuery, LeaderboardResponse, RateFilter, TrendingLeaderboardQuery, TrendingLeaderboardResponse};
 use crate::endpoint::search::{SearchQuery, SearchResponse};
 use crate::model::database::{CreatorStatItem, Database, InfoItem, LevelStatItem, RateItem, SendItem};
@@ -20,6 +21,8 @@ pub struct MongoDatabase {
     creators: mongodb::Collection<Document>,
 
     oldest_level: i32,
+
+    hits_counter: Option<GenericCounterVec<AtomicU64>>,
 }
 
 impl MongoDatabase {
@@ -46,7 +49,14 @@ impl MongoDatabase {
             creator_stats,
             creators,
             oldest_level,
+            hits_counter: None,
         })
+    }
+
+    fn increment_hits(&self, query_type: &str) {
+        if let Some(counter) = &self.hits_counter {
+            counter.with_label_values(&[query_type]).inc();
+        }
     }
 
     fn build_level_pipeline_stages(&self) -> Vec<Document> {
@@ -761,6 +771,7 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_batch_level_pipeline_stages());
 
+        self.increment_hits("batch_levels");
         let mut cursor = self.level_stats.aggregate(pipeline)
             .max_time(Duration::from_secs(5))
             .await?;
@@ -781,6 +792,7 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_level_pipeline_stages());
 
+        self.increment_hits("level");
         let mut cursor = self.level_stats.aggregate(pipeline)
             .max_time(Duration::from_secs(5))
             .await?;
@@ -800,6 +812,7 @@ impl Database for MongoDatabase {
         ];
         pipeline.extend(self.build_creator_pipeline_stages());
 
+        self.increment_hits("creator");
         let mut cursor = self.creator_stats.aggregate(pipeline)
             .max_time(Duration::from_secs(5))
             .await?;
@@ -815,6 +828,7 @@ impl Database for MongoDatabase {
     async fn get_leaderboard_levels(&self, query: &LeaderboardQuery) -> anyhow::Result<LeaderboardResponse> {
         let pipeline = self.build_leaderboard_pipeline_stages(query);
 
+        self.increment_hits("leaderboard");
         let result = self.level_stats
             .aggregate(pipeline)
             .max_time(Duration::from_secs(5))
@@ -843,6 +857,7 @@ impl Database for MongoDatabase {
     async fn get_trending_levels(&self, query: &TrendingLeaderboardQuery) -> anyhow::Result<TrendingLeaderboardResponse> {
         let pipeline = self.build_trending_pipeline_stages(query);
 
+        self.increment_hits("trending_leaderboard");
         let result = self.level_stats
             .aggregate(pipeline)
             .max_time(Duration::from_secs(5))
@@ -868,9 +883,10 @@ impl Database for MongoDatabase {
         Ok(TrendingLeaderboardResponse { total, levels })
     }
 
-    async fn get_creators(&self, query: &CreatorLeaderboardQuery) -> anyhow::Result<CreatorLeaderboardResponse> {
+    async fn get_creator_leaderboard(&self, query: &CreatorLeaderboardQuery) -> anyhow::Result<CreatorLeaderboardResponse> {
         let pipeline = self.build_creator_leaderboard_pipeline_stages(query);
 
+        self.increment_hits("creator_leaderboard");
         let result = self.creator_stats
             .aggregate(pipeline)
             .max_time(Duration::from_secs(5))
@@ -903,6 +919,7 @@ impl Database for MongoDatabase {
         let level_pipeline = self.build_level_search_pipeline(search, limit);
         let creator_pipeline = self.build_creator_search_pipeline(search, limit);
 
+        self.increment_hits("search");
         let (level_cursor, creator_cursor) = tokio::try_join!(
             self.info.aggregate(level_pipeline).max_time(Duration::from_secs(5)),
             self.creators.aggregate(creator_pipeline).max_time(Duration::from_secs(5))
@@ -969,5 +986,10 @@ impl Database for MongoDatabase {
         let total = results.len() as i32;
 
         Ok(SearchResponse { total, results })
+    }
+
+    async fn register_hits_counter(&mut self, stat: GenericCounterVec<AtomicU64>) -> anyhow::Result<()> {
+        self.hits_counter = Some(stat);
+        Ok(())
     }
 }

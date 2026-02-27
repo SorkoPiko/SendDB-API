@@ -11,6 +11,7 @@ use actix_web::middleware::{from_fn, Logger};
 use actix_web_prom::PrometheusMetricsBuilder;
 use fern::Dispatch;
 use log::LevelFilter;
+use prometheus::register_int_counter_vec;
 use utoipa::openapi::{ContactBuilder, InfoBuilder};
 use utoipa_actix_web::{scope, AppExt};
 use utoipa_swagger_ui::SwaggerUi;
@@ -60,6 +61,22 @@ async fn main() -> std::io::Result<()> {
     let prometheus = PrometheusMetricsBuilder::new("senddb_api")
         .endpoint("/metrics")
         .build()
+        .unwrap();
+
+    let db_hits = register_int_counter_vec!(
+        "db_hits_total",
+        "Total number of database hits",
+        &["query_type"]
+    ).unwrap();
+
+    prometheus.registry
+        .register(Box::new(db_hits.clone()))
+        .unwrap();
+
+    database.lock()
+        .await
+        .register_hits_counter(db_hits)
+        .await
         .unwrap();
 
     HttpServer::new(move || {

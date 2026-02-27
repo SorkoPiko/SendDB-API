@@ -133,7 +133,7 @@ pub async fn creator_leaderboard(
 
     let response = {
         let db = database.lock().await;
-        db.get_creators(&query).await
+        db.get_creator_leaderboard(&query).await
             .map_err(|e| {
                 log::error!("{:?}", e);
                 common::internal_server_error("Database error")
