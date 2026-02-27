@@ -3,6 +3,7 @@ mod database;
 mod endpoint;
 
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use actix_cors::Cors;
 use actix_governor::{Governor, GovernorConfigBuilder};
@@ -11,6 +12,7 @@ use actix_web::middleware::{from_fn, Logger};
 use actix_web_prom::PrometheusMetricsBuilder;
 use fern::Dispatch;
 use log::LevelFilter;
+use moka::future::Cache;
 use prometheus::register_int_counter_vec;
 use utoipa::openapi::{ContactBuilder, InfoBuilder};
 use utoipa_actix_web::{scope, AppExt};
@@ -19,6 +21,14 @@ use crate::database::mongo::MongoDatabase;
 use crate::endpoint::ratelimit::IpKeyExtractor;
 use crate::model::config::AppConfig;
 use crate::model::database::Database;
+use crate::model::info::{BatchLevel, Creator, Level};
+
+pub struct AppState {
+    pub database: Arc<Mutex<dyn Database>>,
+    pub level_cache: Cache<i64, Option<Level>>,
+    pub batch_level_cache: Cache<i64, Option<BatchLevel>>,
+    pub creator_cache: Cache<i64, Option<Creator>>,
+}
 
 #[utoipa::path(summary = "Index", responses(
     (status = 200, description = "API is running")
@@ -37,7 +47,7 @@ async fn main() -> std::io::Result<()> {
     })?;
 
     let config = AppConfig::from_env();
-    let database: Arc<Mutex<dyn Database>> = Arc::new(Mutex::new(MongoDatabase::new(config.database_url.as_str(), config.oldest_level).await
+    let database = Arc::new(Mutex::new(MongoDatabase::new(config.database_url.as_str(), config.oldest_level).await
         .map_err(|e| {
             log::error!("Failed to create database connection: {:?}", e);
             std::io::Error::new(std::io::ErrorKind::Other, "Database connection error")
@@ -79,6 +89,22 @@ async fn main() -> std::io::Result<()> {
         .await
         .unwrap();
 
+    let app_state = web::Data::new(AppState {
+        database,
+        level_cache: Cache::builder()
+            .time_to_live(Duration::from_secs(10))
+            .max_capacity(1_000)
+            .build(),
+        batch_level_cache: Cache::builder()
+            .time_to_live(Duration::from_secs(10))
+            .max_capacity(5_000)
+            .build(),
+        creator_cache: Cache::builder()
+            .time_to_live(Duration::from_secs(10))
+            .max_capacity(1_000)
+            .build(),
+    });
+
     HttpServer::new(move || {
         let (app, _) = App::new()
             .wrap(Logger::new(r#"%{X-Real-IP}i "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#))
@@ -97,7 +123,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Governor::new(&governor_daily_conf))
             .wrap(from_fn(endpoint::metrics::metrics_ip_filter))
             .into_utoipa_app()
-            .app_data(web::Data::new(database.clone()))
+            .app_data(app_state.clone())
             .app_data(web::Data::new(config.clone()))
             .service(index)
             .service(scope::scope("/api/v1")

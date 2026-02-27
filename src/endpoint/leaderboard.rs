@@ -1,9 +1,7 @@
-use std::sync::Arc;
 use actix_web::{post, web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use crate::AppState;
 use crate::endpoint::common;
-use crate::model::database::Database;
 use crate::model::info::{LeaderboardCreator, LeaderboardLevel, TrendingLeaderboardLevel};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -64,7 +62,7 @@ pub struct CreatorLeaderboardResponse {
 ))]
 #[post("")]
 pub async fn leaderboard(
-    database: web::Data<Arc<Mutex<dyn Database>>>,
+    app_state: web::Data<AppState>,
     query: web::Json<LeaderboardQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
@@ -76,7 +74,7 @@ pub async fn leaderboard(
     }
 
     let response = {
-        let db = database.lock().await;
+        let db = app_state.database.lock().await;
         db.get_leaderboard_levels(&query).await
             .map_err(|e| {
                 log::error!("{:?}", e);
@@ -92,7 +90,7 @@ pub async fn leaderboard(
 ))]
 #[post("/trending")]
 pub async fn trending_leaderboard(
-    database: web::Data<Arc<Mutex<dyn Database>>>,
+    app_state: web::Data<AppState>,
     query: web::Json<TrendingLeaderboardQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
@@ -104,7 +102,7 @@ pub async fn trending_leaderboard(
     }
 
     let response = {
-        let db = database.lock().await;
+        let db = app_state.database.lock().await;
         db.get_trending_levels(&query).await
             .map_err(|e| {
                 log::error!("{:?}", e);
@@ -120,7 +118,7 @@ pub async fn trending_leaderboard(
 ))]
 #[post("/creators")]
 pub async fn creator_leaderboard(
-    database: web::Data<Arc<Mutex<dyn Database>>>,
+    app_state: web::Data<AppState>,
     query: web::Json<CreatorLeaderboardQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
@@ -132,7 +130,7 @@ pub async fn creator_leaderboard(
     }
 
     let response = {
-        let db = database.lock().await;
+        let db = app_state.database.lock().await;
         db.get_creator_leaderboard(&query).await
             .map_err(|e| {
                 log::error!("{:?}", e);

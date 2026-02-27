@@ -1,9 +1,7 @@
-use std::sync::Arc;
 use actix_web::{post, web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use crate::AppState;
 use crate::endpoint::common;
-use crate::model::database::Database;
 use crate::model::info::SearchResult;
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -24,7 +22,7 @@ pub struct SearchResponse {
 ))]
 #[post("")]
 pub async fn search(
-    database: web::Data<Arc<Mutex<dyn Database>>>,
+    app_state: web::Data<AppState>,
     query: web::Json<SearchQuery>,
 ) -> Result<HttpResponse, actix_web::Error> {
     if query.limit <= 0 {
@@ -34,7 +32,7 @@ pub async fn search(
     }
 
     let response = {
-        let db = database.lock().await;
+        let db = app_state.database.lock().await;
         db.search(&query).await
             .map_err(|e| {
                 log::error!("{:?}", e);

@@ -1,25 +1,25 @@
 use serde::{Deserialize, Serialize};
 use crate::model::database::default_accurate;
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Send {
     timestamp: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreatorLevel {
     name: String,
     level_id: i32,
     send_count: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LevelCreator {
     name: String,
     player_id: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Rate {
     difficulty: i32,
     points: i32,
@@ -29,14 +29,14 @@ pub struct Rate {
     accurate: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LeaderboardRate {
     difficulty: i32,
     points: i32,
     stars: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Level {
     name: String,
     level_id: i32,
@@ -54,9 +54,9 @@ pub struct Level {
     rate: Option<Rate>,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BatchLevel {
-    level_id: i32,
+    pub level_id: i32,
     send_count: i32,
     accurate: bool,
     platformer: bool,
@@ -66,7 +66,7 @@ pub struct BatchLevel {
     rate: Option<Rate>,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Creator {
     name: String,
     player_id: i32,
@@ -82,7 +82,7 @@ pub struct Creator {
     trending_rank: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LeaderboardLevel {
     name: String,
     level_id: i32,
@@ -93,7 +93,7 @@ pub struct LeaderboardLevel {
     rate: Option<LeaderboardRate>,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct TrendingLeaderboardLevel {
     name: String,
     level_id: i32,
@@ -105,7 +105,7 @@ pub struct TrendingLeaderboardLevel {
     rate: Option<LeaderboardRate>,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LeaderboardCreator {
     name: String,
     player_id: i32,
@@ -117,7 +117,7 @@ pub struct LeaderboardCreator {
     trending_rank: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SearchResultCreator {
     pub name: String,
     pub player_id: i32,
@@ -127,7 +127,7 @@ fn default_relevance() -> f64 {
     0.0
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SearchLevel {
     pub level_id: i32,
     pub name: String,
@@ -140,7 +140,7 @@ pub struct SearchLevel {
     pub relevance: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SearchCreator {
     pub player_id: i32,
     pub name: String,
@@ -153,9 +153,24 @@ pub struct SearchCreator {
     pub relevance: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SearchResult {
     Level(SearchLevel),
     Creator(SearchCreator),
+}
+
+impl From<Level> for BatchLevel {
+    fn from(level: Level) -> Self {
+        BatchLevel {
+            level_id: level.level_id,
+            send_count: level.sends.len() as i32,
+            accurate: level.accurate,
+            platformer: level.platformer,
+            length: level.length,
+            rank: level.rank,
+            trending_score: level.trending_score,
+            rate: level.rate,
+        }
+    }
 }
