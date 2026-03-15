@@ -4,6 +4,7 @@ pub struct AppConfig {
     pub server_port: u16,
     pub oldest_level: i32,
     pub database_url: String,
+    pub jwt_secret: Option<String>,
 }
 
 impl AppConfig {
@@ -13,6 +14,7 @@ impl AppConfig {
             server_port: std::env::var("SERVER_PORT").expect("SERVER_PORT must be a valid u16").parse().unwrap(),
             oldest_level: std::env::var("OLDEST_LEVEL").expect("OLDEST_LEVEL must be a valid i32").parse().unwrap(),
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+            jwt_secret: std::env::var("JWT_SECRET").ok(),
         }
     }
 }

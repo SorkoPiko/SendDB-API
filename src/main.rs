@@ -57,14 +57,14 @@ async fn main() -> std::io::Result<()> {
 
     let governor_conf = GovernorConfigBuilder::default()
         .requests_per_minute(60)
-        .key_extractor(IpKeyExtractor)
+        .key_extractor(IpKeyExtractor::new(config.jwt_secret.clone()))
         .finish()
         .unwrap();
 
     let governor_daily_conf = GovernorConfigBuilder::default()
         .seconds_per_request(86400 / 5000)
         .burst_size(5000)
-        .key_extractor(IpKeyExtractor)
+        .key_extractor(IpKeyExtractor::new(config.jwt_secret.clone()))
         .finish()
         .unwrap();
 
@@ -122,6 +122,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Governor::new(&governor_conf))
             .wrap(Governor::new(&governor_daily_conf))
             .wrap(from_fn(endpoint::metrics::metrics_ip_filter))
+            .wrap(from_fn(endpoint::jwt::auth_middleware))
             .into_utoipa_app()
             .app_data(app_state.clone())
             .app_data(web::Data::new(config.clone()))

@@ -12,6 +12,10 @@ pub fn internal_server_error(message: &str) -> actix_web::Error {
     actix_web::error::ErrorInternalServerError(generic_error(message.to_owned()))
 }
 
+pub fn unauthorized(message: &str) -> actix_web::Error {
+    actix_web::error::ErrorUnauthorized(generic_error(message.to_owned()))
+}
+
 pub fn generic_error(message: String) -> serde_json::Value {
     json!({
         "error": true,

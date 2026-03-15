@@ -5,3 +5,4 @@ pub mod leaderboard;
 pub mod ratelimit;
 pub mod search;
 pub mod metrics;
+pub mod jwt;
