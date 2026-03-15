@@ -35,7 +35,6 @@ impl KeyExtractor for IpKeyExtractor {
 
     fn extract(&self, req: &actix_web::dev::ServiceRequest) -> Result<Self::Key, Self::KeyExtractionError> {
         if let Some(_) = self.extract_token(req) {
-            log::debug!("Authenticated request, exempt from rate limiting");
             return Ok(RateLimitKey::Exempt);
         }
 
