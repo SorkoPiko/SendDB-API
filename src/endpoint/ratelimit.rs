@@ -21,15 +21,9 @@ impl std::fmt::Display for RateLimitKey {
 }
 
 #[derive(Debug, Clone)]
-pub struct IpKeyExtractor {
-    pub jwt_secret: Option<String>,
-}
+pub struct IpKeyExtractor;
 
 impl IpKeyExtractor {
-    pub fn new(jwt_secret: Option<String>) -> Self {
-        Self { jwt_secret }
-    }
-
     fn extract_token(&self, req: &actix_web::dev::ServiceRequest) -> Option<TokenClaims> {
         req.extensions().get::<TokenClaims>().cloned()
     }

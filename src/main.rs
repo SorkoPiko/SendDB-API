@@ -57,14 +57,14 @@ async fn main() -> std::io::Result<()> {
 
     let governor_conf = GovernorConfigBuilder::default()
         .requests_per_minute(60)
-        .key_extractor(IpKeyExtractor::new(config.jwt_secret.clone()))
+        .key_extractor(IpKeyExtractor)
         .finish()
         .unwrap();
 
     let governor_daily_conf = GovernorConfigBuilder::default()
         .seconds_per_request(86400 / 5000)
         .burst_size(5000)
-        .key_extractor(IpKeyExtractor::new(config.jwt_secret.clone()))
+        .key_extractor(IpKeyExtractor)
         .finish()
         .unwrap();
 
