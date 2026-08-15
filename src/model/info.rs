@@ -73,6 +73,7 @@ pub struct Creator {
     account_id: i32,
     levels: Vec<CreatorLevel>,
     send_count: i32,
+    points: i32,
     recent_sends: i32,
     send_count_stddev: f64,
     trending_score: f64,

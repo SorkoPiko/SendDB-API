@@ -251,6 +251,7 @@ impl MongoDatabase {
                     "account_id": 1,
                     "levels": 1,
                     "send_count": 1,
+                    "points": 1,
                     "recent_sends": 1,
                     "send_count_stddev": 1,
                     "trending_score": 1,
